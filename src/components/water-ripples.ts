@@ -4,6 +4,7 @@ const WATER_LAYER = "surface-ripples";
 const CHANNEL_IMAGE = "channel-ripples";
 const OPEN_WATER_IMAGE = "open-water-ripples";
 const SIZE = 64;
+const WATER_MIN_ZOOM = 14.5;
 const SCALE = (2 * Math.PI) / SIZE;
 
 type Vector = { x: number; y: number };
@@ -19,20 +20,23 @@ function drawSurface(
   wind: number,
   channel: boolean,
 ) {
+  const [red, green, blue] = channel ? ([91, 133, 137] as const) : ([102, 146, 163] as const);
+  const swellStrength = 6 + wind * 0.15;
+  const glintStrength = 11 + wind * 0.44;
   for (let y = 0; y < SIZE; y += 1) {
+    const v = (y - drift.y * time) * SCALE;
     for (let x = 0; x < SIZE; x += 1) {
       const offset = (x + y * SIZE) * 4;
       const u = (x - drift.x * time) * SCALE;
-      const v = (y - drift.y * time) * SCALE;
       const swell = Math.sin(2 * u - v + Math.sin(u + 2 * v) * 0.7);
       const ripple = Math.sin(4 * u + 7 * v + 1.7 * swell + time * 0.57);
       const crossRipple = Math.sin(7 * u - 5 * v + 1.2 * swell - time * 0.42);
       const reflection = 0.53 * swell + 0.3 * ripple + 0.17 * crossRipple;
       const glint = Math.max(0, 0.63 * ripple + 0.37 * crossRipple - 0.33);
-      const light = reflection * (6 + wind * 0.15) + glint * (11 + wind * 0.44);
-      image.data[offset] = (channel ? 91 : 102) + 0.83 * light;
-      image.data[offset + 1] = (channel ? 133 : 146) + light;
-      image.data[offset + 2] = (channel ? 137 : 163) + 1.09 * light;
+      const light = reflection * swellStrength + glint * glintStrength;
+      image.data[offset] = red + 0.83 * light;
+      image.data[offset + 1] = green + light;
+      image.data[offset + 2] = blue + 1.09 * light;
       image.data[offset + 3] = 255;
     }
   }
@@ -54,7 +58,7 @@ export function installWaterRipples(map: MapLibreMap, below?: string) {
       type: "fill-extrusion",
       source: "openmaptiles",
       "source-layer": "water",
-      minzoom: 14.5,
+      minzoom: WATER_MIN_ZOOM,
       filter: ["!=", ["get", "class"], "swimming_pool"],
       paint: {
         "fill-extrusion-height": 0.12,
@@ -130,7 +134,7 @@ export function animateWaterRipples(
   let timer: ReturnType<typeof setInterval> | undefined;
 
   function startIfVisible() {
-    if (timer !== undefined || map.isMoving() || map.getZoom() < 14.5) return;
+    if (timer !== undefined || map.isMoving() || map.getZoom() < WATER_MIN_ZOOM) return;
     const surfaces = map.queryRenderedFeatures({ layers: [WATER_LAYER] });
     const hasChannel = surfaces.some(({ properties }) => properties["class"] === "river");
     const open = speed > 0 && surfaces.some(({ properties }) => properties["class"] !== "river");

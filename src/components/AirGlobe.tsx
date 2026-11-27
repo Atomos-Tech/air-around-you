@@ -21,29 +21,10 @@ type Props = {
 
 const MAP_STYLE = "https://tiles.openfreemap.org/styles/liberty";
 
-export default function AirGlobe({
-  place,
-  pendingPoint,
-  view,
-  conditions,
-  paused,
-  onMapPick,
-  onMapError,
-}: Props) {
+function useEarthMap(onMapPick: Props["onMapPick"], onMapError: Props["onMapError"]) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
-  const avatarRef = useRef<ReturnType<typeof mountAvatar> | null>(null);
-  const motionRef = useRef(paused);
-  const waterClock = useRef({ seconds: 0 });
   const [mapReady, setMapReady] = useState(false);
-  const wind = conditions.weather?.windSpeed ?? null;
-  const windFrom = conditions.weather?.windFrom ?? null;
-
-  useEffect(() => {
-    motionRef.current = paused;
-    avatarRef.current?.setPaused(paused);
-  }, [paused]);
-
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -94,47 +75,79 @@ export default function AirGlobe({
       setMapReady(false);
     };
   }, [onMapPick, onMapError]);
+  return { containerRef, mapRef, mapReady };
+}
+
+function moveCamera(
+  map: maplibregl.Map,
+  width: number,
+  place: Props["place"],
+  view: Props["view"],
+) {
+  const compact = width < 700;
+  const reducedMotion = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+
+  if (view === "globe" || !place) {
+    map.setTerrain(null);
+    map.flyTo({
+      center: place ? [place.longitude, place.latitude] : [16, 20],
+      zoom: compact ? 1.05 : 1.95,
+      pitch: 0,
+      bearing: 0,
+      duration: reducedMotion ? 0 : 1800,
+      padding: compact
+        ? { top: 0, bottom: 190, left: 0, right: 0 }
+        : { top: 0, bottom: 0, left: Math.min(355, width * 0.31), right: 0 },
+    });
+    return;
+  }
+
+  map.setTerrain({ source: TERRAIN_SOURCE, exaggeration: 1 });
+  map.flyTo({
+    center: [place.longitude, place.latitude],
+    zoom: 17.1,
+    pitch: 68,
+    bearing: 24,
+    duration: reducedMotion ? 0 : 2550,
+    padding: compact
+      ? { top: 20, bottom: 173, left: 0, right: 0 }
+      : { top: 24, bottom: 0, left: 290, right: 0 },
+  });
+}
+
+export default function AirGlobe({
+  place,
+  pendingPoint,
+  view,
+  conditions,
+  paused,
+  onMapPick,
+  onMapError,
+}: Props) {
+  const { containerRef, mapRef, mapReady } = useEarthMap(onMapPick, onMapError);
+  const avatarRef = useRef<ReturnType<typeof mountAvatar> | null>(null);
+  const motionRef = useRef(paused);
+  const waterClock = useRef({ seconds: 0 });
+  const wind = conditions.weather?.windSpeed ?? null;
+  const windFrom = conditions.weather?.windFrom ?? null;
+
+  useEffect(() => {
+    motionRef.current = paused;
+    avatarRef.current?.setPaused(paused);
+  }, [paused]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady || !place || view !== "street" || paused) return;
     return animateWaterRipples(map, wind, windFrom, waterClock.current);
-  }, [mapReady, paused, place, view, wind, windFrom]);
+  }, [mapRef, mapReady, paused, place, view, wind, windFrom]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
     const width = containerRef.current?.clientWidth ?? 0;
-    const compact = width < 700;
-    const reducedMotion = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
-
-    if (view === "globe" || !place) {
-      map.setTerrain(null);
-      map.flyTo({
-        center: place ? [place.longitude, place.latitude] : [16, 20],
-        zoom: compact ? 1.05 : 1.95,
-        pitch: 0,
-        bearing: 0,
-        duration: reducedMotion ? 0 : 1800,
-        padding: compact
-          ? { top: 0, bottom: 190, left: 0, right: 0 }
-          : { top: 0, bottom: 0, left: Math.min(355, width * 0.31), right: 0 },
-      });
-      return;
-    }
-
-    map.setTerrain({ source: TERRAIN_SOURCE, exaggeration: 1 });
-    map.flyTo({
-      center: [place.longitude, place.latitude],
-      zoom: 17.1,
-      pitch: 68,
-      bearing: 24,
-      duration: reducedMotion ? 0 : 2550,
-      padding: compact
-        ? { top: 20, bottom: 173, left: 0, right: 0 }
-        : { top: 24, bottom: 0, left: 290, right: 0 },
-    });
-  }, [place, view, mapReady]);
+    moveCamera(map, width, place, view);
+  }, [containerRef, mapRef, place, view, mapReady]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -167,7 +180,7 @@ export default function AirGlobe({
       avatarRef.current = null;
       marker.remove();
     };
-  }, [mapReady, view, place]);
+  }, [mapRef, mapReady, view, place]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -181,7 +194,7 @@ export default function AirGlobe({
     return () => {
       marker.remove();
     };
-  }, [mapReady, pendingPoint]);
+  }, [mapRef, mapReady, pendingPoint]);
 
   const getLocalView = useCallback(() => {
     const map = mapRef.current;
@@ -190,7 +203,7 @@ export default function AirGlobe({
     const { clientWidth, clientHeight } = map.getContainer();
     if (x < 0 || y < 0 || x > clientWidth || y > clientHeight) return null;
     return { x, y, bearing: map.getBearing(), pitch: map.getPitch() };
-  }, [view, place]);
+  }, [view, place, mapRef]);
 
   return (
     <>

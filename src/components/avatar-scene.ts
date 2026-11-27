@@ -1,4 +1,6 @@
 import {
+  type BufferGeometry,
+  type Material,
   AmbientLight,
   CapsuleGeometry,
   CircleGeometry,
@@ -34,12 +36,72 @@ export function mountAvatar(container: HTMLElement) {
   rimLight.position.set(3, 2, -3);
   scene.add(rimLight);
 
+  const { character, torso, head } = createCharacter();
+  scene.add(character);
+
+  const shadow = new Mesh(
+    new CircleGeometry(0.37, 48),
+    new MeshBasicMaterial({ color: 0x14241e, transparent: true, opacity: 0.37, depthWrite: false }),
+  );
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = 0.003;
+  shadow.scale.y = 0.72;
+  scene.add(shadow);
+
+  let frame = 0;
+  let paused = true;
+  let elapsed = 0;
+  let lastFrame: number | null = null;
+  function render(time: number) {
+    if (lastFrame !== null) elapsed += Math.min(time - lastFrame, 55);
+    lastFrame = time;
+    const cycle = (elapsed % 6100) / 6100;
+    const expansion =
+      cycle < 0.38
+        ? (1 - Math.cos((cycle / 0.38) * Math.PI)) / 2
+        : (1 + Math.cos(((cycle - 0.38) / 0.62) * Math.PI)) / 2;
+    torso.scale.set(1 + expansion * 0.026, 1, 1 + expansion * 0.046);
+    torso.position.y = expansion * 0.01;
+    head.rotation.y = Math.sin(elapsed / 3100) * 0.075;
+    renderer.render(scene, camera);
+    if (!paused) frame = requestAnimationFrame(render);
+  }
+  render(0);
+
+  return {
+    setPaused(next: boolean) {
+      if (paused === next) return;
+      paused = next;
+      lastFrame = null;
+      cancelAnimationFrame(frame);
+      if (!paused) frame = requestAnimationFrame(render);
+    },
+    destroy() {
+      cancelAnimationFrame(frame);
+      const geometries = new Set<BufferGeometry>();
+      const materials = new Set<Material>();
+      scene.traverse((object) => {
+        if (object instanceof Mesh) {
+          geometries.add(object.geometry);
+          materials.add(object.material);
+        }
+      });
+      geometries.forEach((geometry) => geometry.dispose());
+      materials.forEach((material) => material.dispose());
+      renderer.dispose();
+      renderer.forceContextLoss();
+      renderer.domElement.remove();
+    },
+  };
+}
+
+function createCharacter() {
   const character = new Group();
   const torso = new Group();
   const head = new Group();
   character.add(torso);
   torso.add(head);
-  scene.add(character);
+
   head.position.y = 1.71;
 
   function material(color: number) {
@@ -55,19 +117,24 @@ export function mountAvatar(container: HTMLElement) {
   const sole = material(0xd7d6c8);
   const eye = material(0x292120);
 
-  function oval(parent: Group, paint: MeshStandardMaterial, position: number[], scale: number[]) {
-    const part = new Mesh(new SphereGeometry(1, 24, 16), paint);
+  const sphere = new SphereGeometry(1, 24, 16);
+  function oval(
+    parent: Group,
+    paint: MeshStandardMaterial,
+    position: [number, number, number],
+    scale: [number, number, number],
+  ) {
+    const part = new Mesh(sphere, paint);
     part.position.fromArray(position);
     part.scale.fromArray(scale);
     parent.add(part);
-    return part;
   }
 
   function limb(
     parent: Group,
     paint: MeshStandardMaterial,
-    start: number[],
-    end: number[],
+    start: [number, number, number],
+    end: [number, number, number],
     radius: number,
   ) {
     const from = new Vector3().fromArray(start);
@@ -109,54 +176,5 @@ export function mountAvatar(container: HTMLElement) {
     oval(character, shoe, [side * 0.119, 0.072, 0.044], [0.076, 0.057, 0.139]);
   }
 
-  const shadow = new Mesh(
-    new CircleGeometry(0.37, 48),
-    new MeshBasicMaterial({ color: 0x14241e, transparent: true, opacity: 0.37, depthWrite: false }),
-  );
-  shadow.rotation.x = -Math.PI / 2;
-  shadow.position.y = 0.003;
-  shadow.scale.y = 0.72;
-  scene.add(shadow);
-
-  let frame = 0;
-  let paused = true;
-  let elapsed = 0;
-  let lastFrame: number | null = null;
-  function render(time: number) {
-    if (lastFrame !== null) elapsed += Math.min(time - lastFrame, 55);
-    lastFrame = time;
-    const cycle = (elapsed % 6100) / 6100;
-    const expansion =
-      cycle < 0.38
-        ? (1 - Math.cos((cycle / 0.38) * Math.PI)) / 2
-        : (1 + Math.cos(((cycle - 0.38) / 0.62) * Math.PI)) / 2;
-    torso.scale.set(1 + expansion * 0.026, 1, 1 + expansion * 0.046);
-    torso.position.y = expansion * 0.01;
-    head.rotation.y = Math.sin(elapsed / 3100) * 0.075;
-    renderer.render(scene, camera);
-    if (!paused) frame = requestAnimationFrame(render);
-  }
-  render(0);
-
-  return {
-    setPaused(next: boolean) {
-      if (paused === next) return;
-      paused = next;
-      lastFrame = null;
-      cancelAnimationFrame(frame);
-      if (!paused) frame = requestAnimationFrame(render);
-    },
-    destroy() {
-      cancelAnimationFrame(frame);
-      scene.traverse((object) => {
-        if (object instanceof Mesh) {
-          object.geometry.dispose();
-          object.material.dispose();
-        }
-      });
-      renderer.dispose();
-      renderer.forceContextLoss();
-      renderer.domElement.remove();
-    },
-  };
+  return { character, torso, head };
 }

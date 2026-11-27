@@ -35,5 +35,13 @@ export default tseslint.config(
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
     },
   },
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["**/*.test.*", "src/test/**"],
+    rules: {
+      complexity: ["error", 15],
+      "max-lines-per-function": ["error", { max: 100, skipBlankLines: true, skipComments: true }],
+    },
+  },
   eslintPluginPrettier,
 );
