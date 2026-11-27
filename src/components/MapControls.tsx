@@ -54,7 +54,7 @@ export default function MapControls({
           {geoMessage}
         </div>
       )}
-      {mapError && (
+      {mapError && !geoMessage && (
         <div className="map-notice" role="status">
           Some map imagery couldn’t load. You can still explore readings by place.
         </div>
