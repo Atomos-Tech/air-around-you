@@ -6,6 +6,7 @@ import {
   formatTime,
   hasModeledFog,
   isDelayed,
+  type AirReading,
   type Environment,
 } from "@/data/air-quality";
 import { localAdvisory, WEATHER_SOURCE } from "@/data/air-sources";
@@ -23,17 +24,6 @@ export default function AirDetails({
   const { air, weather, observation } = conditions;
   const observationSource = observation ? AIR_OBSERVATION_SOURCES[observation.source] : null;
   const official = localAdvisory(countryCode);
-  const pollutants: Array<[string, number | null]> = air
-    ? [
-        ["Fine particles (PM₂.₅)", air.pm25],
-        ["Inhalable particles (PM₁₀)", air.pm10],
-        ["Nitrogen dioxide (NO₂)", air.nitrogenDioxide],
-        ["Ozone (O₃)", air.ozone],
-        ["Carbon monoxide (CO)", air.carbonMonoxide],
-        ["Sulphur dioxide (SO₂)", air.sulphurDioxide],
-        ["Modeled dust", air.dust],
-      ]
-    : [];
 
   return (
     <>
@@ -51,27 +41,7 @@ export default function AirDetails({
         </section>
       )}
       {air ? (
-        <>
-          <h3 className="data-section-title">Area model estimates</h3>
-          <AirModelCredit air={air} />
-          <dl className="pollutant-list">
-            {pollutants.map(([label, value]) => (
-              <div key={label}>
-                <dt>{label}</dt>
-                <dd>
-                  {value === null
-                    ? "Unavailable"
-                    : `${value.toLocaleString(undefined, { maximumFractionDigits: 1 })} µg/m³`}
-                </dd>
-              </div>
-            ))}
-          </dl>
-          {air.usAqi !== null && (
-            <p className="reading-meta">
-              {Math.round(air.usAqi)} modeled US AQI · {airCategory(air.usAqi).label}
-            </p>
-          )}
-        </>
+        <ModelEstimates air={air} />
       ) : (
         <p className="reading-meta">
           {loading ? "Getting air conditions…" : "Air estimates are unavailable for this point."}
@@ -99,6 +69,44 @@ export default function AirDetails({
         The 3D scene uses area weather and air data. Water motion illustrates wind and the path of
         mapped waterways.
       </p>
+    </>
+  );
+}
+
+const POLLUTANTS = [
+  ["pm25", "Fine particles (PM₂.₅)"],
+  ["pm10", "Inhalable particles (PM₁₀)"],
+  ["nitrogenDioxide", "Nitrogen dioxide (NO₂)"],
+  ["ozone", "Ozone (O₃)"],
+  ["carbonMonoxide", "Carbon monoxide (CO)"],
+  ["sulphurDioxide", "Sulphur dioxide (SO₂)"],
+  ["dust", "Modeled dust"],
+] as const;
+
+function formatConcentration(value: number | null) {
+  return value === null
+    ? "Unavailable"
+    : `${value.toLocaleString(undefined, { maximumFractionDigits: 1 })} µg/m³`;
+}
+
+function ModelEstimates({ air }: { air: AirReading }) {
+  return (
+    <>
+      <h3 className="data-section-title">Area model estimates</h3>
+      <AirModelCredit air={air} />
+      <dl className="pollutant-list">
+        {POLLUTANTS.map(([field, label]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd>{formatConcentration(air[field])}</dd>
+          </div>
+        ))}
+      </dl>
+      {air.usAqi !== null && (
+        <p className="reading-meta">
+          {Math.round(air.usAqi)} modeled US AQI · {airCategory(air.usAqi).label}
+        </p>
+      )}
     </>
   );
 }

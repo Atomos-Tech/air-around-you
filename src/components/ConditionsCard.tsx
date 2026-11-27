@@ -7,6 +7,7 @@ import {
   formatTime,
   hasModeledFog,
   isDelayed,
+  type AirReading,
   type Environment,
 } from "@/data/air-quality";
 import type { PlaceSelection } from "@/data/places";
@@ -107,26 +108,13 @@ function AirSummary({
 }) {
   const { air, observation: measured } = conditions;
   const pm25 = measured?.pm25 ?? air?.pm25;
-  const category = airCategory(air?.usAqi);
   return (
     <div className="air-summary" aria-live="polite">
       {loading ? (
         <p className="status-copy">Getting air conditions…</p>
       ) : (
         <>
-          <div className="aqi-summary">
-            {air?.usAqi != null ? (
-              <p className="aqi-reading" data-severity={category.severity}>
-                <span className="aqi-dot" aria-hidden="true" />
-                <span>
-                  <strong>{Math.round(air.usAqi)} modeled US AQI</strong> · {category.label}
-                </span>
-              </p>
-            ) : (
-              <p className="reading-meta">Modeled US AQI unavailable.</p>
-            )}
-            {measured && air?.usAqi != null && <AirModelCredit air={air} />}
-          </div>
+          <AqiSummary air={air} showCredit={Boolean(measured)} />
           {pm25 != null ? (
             <div className="pm-value">
               {Math.round(pm25 * 10) / 10} <span>µg/m³ PM₂.₅</span>
@@ -150,6 +138,28 @@ function AirSummary({
       {accuracyMeters !== undefined && (
         <p className="reading-meta">Device accuracy ±{Math.round(accuracyMeters)} m</p>
       )}
+    </div>
+  );
+}
+
+function AqiSummary({ air, showCredit }: { air: AirReading | null; showCredit: boolean }) {
+  if (air?.usAqi == null) {
+    return (
+      <div className="aqi-summary">
+        <p className="reading-meta">Modeled US AQI unavailable.</p>
+      </div>
+    );
+  }
+  const category = airCategory(air.usAqi);
+  return (
+    <div className="aqi-summary">
+      <p className="aqi-reading" data-severity={category.severity}>
+        <span className="aqi-dot" aria-hidden="true" />
+        <span>
+          <strong>{Math.round(air.usAqi)} modeled US AQI</strong> · {category.label}
+        </span>
+      </p>
+      {showCredit && <AirModelCredit air={air} />}
     </div>
   );
 }

@@ -1,6 +1,5 @@
 export const AUDIENCES = ["Family", "School", "Community group"] as const;
 export const TRAVEL_MODES = ["Drive", "Transit or carpool", "Walk or cycle", "Stay local"] as const;
-export const PLAN_SECTIONS = ["Outdoor routine", "Indoor air", "Lower-emission travel"] as const;
 
 export type PlanProfile = {
   audience: (typeof AUDIENCES)[number];
@@ -9,23 +8,27 @@ export type PlanProfile = {
   hasFilter: boolean;
 };
 
-export type PlanAction = { title: string; impact: string; source: "outdoor" | "indoor" | "travel" };
-type ActionChoices = [PlanAction, ...PlanAction[]];
-
 export const PLAN_SOURCES = {
   outdoor: {
+    section: "Outdoor routine",
     name: "AirNow activity guidance",
     url: "https://www.airnow.gov/publications/activity-guides/air-quality-and-outdoor-activity-guidance-for-schools/",
   },
   indoor: {
+    section: "Indoor air",
     name: "EPA indoor air guidance",
     url: "https://www.epa.gov/emergencies-iaq/wildfires-and-indoor-air-quality-iaq",
   },
   travel: {
+    section: "Lower-emission travel",
     name: "EPA fuel-saving guidance",
     url: "https://www.epa.gov/greenvehicles/your-mileage-may-vary",
   },
 } as const;
+
+type Section = keyof typeof PLAN_SOURCES;
+export type PlanAction<S extends Section = Section> = { title: string; impact: string; source: S };
+type ActionChoices<S extends Section> = [PlanAction<S>, ...PlanAction<S>[]];
 
 const actions = {
   advisory: {
@@ -140,7 +143,10 @@ const indoorActivityByAudience = {
   "Community group": actions.groupActivity,
 } satisfies Record<PlanProfile["audience"], PlanAction>;
 
-function outdoorOptions(aqi: number | null, { audience, flexible }: PlanProfile): ActionChoices {
+function outdoorOptions(
+  aqi: number | null,
+  { audience, flexible }: PlanProfile,
+): ActionChoices<"outdoor"> {
   if (aqi === null) return [actions.advisory];
   const indoorActivity = indoorActivityByAudience[audience];
   if (aqi > 150) {
@@ -152,14 +158,17 @@ function outdoorOptions(aqi: number | null, { audience, flexible }: PlanProfile)
   return [actions.checkAgain, actions.advisory];
 }
 
-function indoorOptions(aqi: number | null, { audience, hasFilter }: PlanProfile): ActionChoices {
+function indoorOptions(
+  aqi: number | null,
+  { audience, hasFilter }: PlanProfile,
+): ActionChoices<"indoor"> {
   const alternative = audience === "Family" ? actions.lowerSmokeCooking : actions.skipSprays;
   if (!hasFilter) return [actions.avoidIncense, alternative];
   if (aqi !== null && aqi > 150) return [actions.useFilter, actions.cleanerRoom];
   return [actions.useFilter, actions.avoidIncense, alternative];
 }
 
-function travelOptions(aqi: number | null, mode: PlanProfile["travel"]): ActionChoices {
+function travelOptions(aqi: number | null, mode: PlanProfile["travel"]): ActionChoices<"travel"> {
   switch (mode) {
     case "Drive":
       return [actions.combine, actions.idling, actions.share];
@@ -177,7 +186,11 @@ function travelOptions(aqi: number | null, mode: PlanProfile["travel"]): ActionC
 export function planOptions(
   aqi: number | null,
   profile: PlanProfile,
-): readonly [outdoor: ActionChoices, indoor: ActionChoices, travel: ActionChoices] {
+): readonly [
+  outdoor: ActionChoices<"outdoor">,
+  indoor: ActionChoices<"indoor">,
+  travel: ActionChoices<"travel">,
+] {
   return [
     outdoorOptions(aqi, profile),
     indoorOptions(aqi, profile),

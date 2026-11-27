@@ -1,7 +1,7 @@
 import { Wllama } from "@wllama/wllama";
 import wasmUrl from "@wllama/wllama/esm/wasm/wllama.wasm?url";
 
-import { PLAN_SECTIONS, planOptions, resolvePlan, type PlanProfile } from "@/data/daily-plan";
+import { PLAN_SOURCES, planOptions, resolvePlan, type PlanProfile } from "@/data/daily-plan";
 
 const MODEL_URL =
   "https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/09816acd5d99df7be770d85ea30822623dab342c/SmolLM2-135M-Instruct-Q4_K_S.gguf";
@@ -31,9 +31,8 @@ export async function generateDailyPlan(
       (choices, index) =>
         `choice${index} ::= ${choices.map((_, choice) => `"${choice}"`).join(" | ")}`,
     );
-    const grammar = ['root ::= "[" choice0 "," choice1 "," choice2 "]"', ...alternatives].join(
-      "\n",
-    );
+    const sectionRules = options.map((_, index) => `choice${index}`);
+    const grammar = [`root ::= "[" ${sectionRules.join(' "," ')} "]"`, ...alternatives].join("\n");
     const completion = await runtime.createChatCompletion({
       messages: [
         {
@@ -47,8 +46,8 @@ export async function generateDailyPlan(
             modeledUsAqi: aqi,
             ...profile,
             sections: Object.fromEntries(
-              options.map((choices, index) => [
-                PLAN_SECTIONS[index],
+              options.map((choices) => [
+                PLAN_SOURCES[choices[0].source].section,
                 choices.map(({ title, impact }) => `${title}. ${impact}`),
               ]),
             ),

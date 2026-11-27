@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { airCategory, formatTime, type AirReading } from "@/data/air-quality";
-import { PLAN_SECTIONS, planOptions, type PlanAction, type PlanProfile } from "@/data/daily-plan";
+import { PLAN_SOURCES, planOptions, type PlanAction, type PlanProfile } from "@/data/daily-plan";
 
 const DEFAULT_PROFILE: PlanProfile = {
   audience: "Family",
@@ -69,7 +69,7 @@ export function useDailyPlan({ location, air, advisory }: DailyPlanProps) {
       `Air Around You · ${location} · ${profile.audience}`,
       context,
       ...actions.map(
-        (action, index) => `${PLAN_SECTIONS[index]} — ${action.title}. ${action.impact}`,
+        (action) => `${PLAN_SOURCES[action.source].section} — ${action.title}. ${action.impact}`,
       ),
       ...(advisory ? [`${advisory.name} — ${advisory.url}`] : []),
     ];

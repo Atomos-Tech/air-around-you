@@ -3,7 +3,7 @@ import PlanSelect from "@/components/PlanSelect";
 import { Switch } from "@/components/ui/switch";
 import { formatTime } from "@/data/air-quality";
 import { useDailyPlan, type DailyPlanProps } from "@/hooks/useDailyPlan";
-import { AUDIENCES, PLAN_SECTIONS, PLAN_SOURCES, TRAVEL_MODES } from "@/data/daily-plan";
+import { AUDIENCES, PLAN_SOURCES, TRAVEL_MODES } from "@/data/daily-plan";
 
 export default function DailyPlan(props: DailyPlanProps) {
   const { air, loading, advisory } = props;
@@ -81,9 +81,9 @@ export default function DailyPlan(props: DailyPlanProps) {
       </p>
 
       <ul className="action-list" aria-label={aiActions ? "AI plan" : "Quick plan"}>
-        {actions.map((action, index) => (
-          <li key={PLAN_SECTIONS[index]}>
-            <span>{PLAN_SECTIONS[index]}</span>
+        {actions.map((action) => (
+          <li key={action.source}>
+            <span>{PLAN_SOURCES[action.source].section}</span>
             <h3>{action.title}</h3>
             <p>{action.impact}</p>
             <a
