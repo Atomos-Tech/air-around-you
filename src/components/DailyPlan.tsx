@@ -1,6 +1,7 @@
-import { Clipboard, Sparkles } from "lucide-react";
+import { Check, Clipboard, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import PlanSelect from "@/components/PlanSelect";
 import { Switch } from "@/components/ui/switch";
 import { airCategory, formatTime, type AirReading } from "@/data/air-quality";
 import {
@@ -97,61 +98,62 @@ export default function DailyPlan({ location, air, loading, advisory }: Props) {
     setStatus("");
   }
 
+  function statusMessage() {
+    if (busy) {
+      if (progress === null || progress >= 1) return "Preparing your plan on this device…";
+      return `Downloading the AI model… ${Math.floor(progress * 100)}%`;
+    }
+    if (status) return status;
+    return aiActions
+      ? "AI selected the actions from published guidance."
+      : "AI runs on this device. First use downloads about 110 MB.";
+  }
+
   return (
     <>
-      <p className="plan-context">
-        {basis}
-        {air && ` · ${formatTime(air.timestamp)}`}
+      <p className="plan-context" aria-live="polite">
+        <strong>{loading ? "Getting local air conditions…" : basis}</strong>
+        {air && (
+          <time dateTime={new Date(air.timestamp).toISOString()}>{formatTime(air.timestamp)}</time>
+        )}
       </p>
       <fieldset disabled={busy} className="plan-preferences">
         <legend>Make the plan fit your day</legend>
         <div className="plan-selects">
-          <label>
-            Planning for
-            <select
-              value={profile.audience}
-              onChange={(event) => {
-                const audience = AUDIENCES.find((choice) => choice === event.target.value);
-                if (audience) updateProfile({ ...profile, audience });
-              }}
-            >
-              {AUDIENCES.map((audience) => (
-                <option key={audience}>{audience}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Getting around
-            <select
-              value={profile.travel}
-              onChange={(event) => {
-                const travel = TRAVEL_MODES.find((choice) => choice === event.target.value);
-                if (travel) updateProfile({ ...profile, travel });
-              }}
-            >
-              {TRAVEL_MODES.map((travel) => (
-                <option key={travel}>{travel}</option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <div className="flexible-row">
-          <label htmlFor="flexible-timing">Outdoor timing is flexible</label>
-          <Switch
-            id="flexible-timing"
-            checked={profile.flexible}
+          <PlanSelect
+            label="Planning for"
+            options={AUDIENCES}
+            value={profile.audience}
             disabled={busy}
-            onCheckedChange={(flexible) => updateProfile({ ...profile, flexible })}
+            onChange={(audience) => updateProfile({ ...profile, audience })}
+          />
+          <PlanSelect
+            label="Getting around"
+            options={TRAVEL_MODES}
+            value={profile.travel}
+            disabled={busy}
+            onChange={(travel) => updateProfile({ ...profile, travel })}
           />
         </div>
-        <div className="flexible-row">
-          <label htmlFor="has-air-filter">An indoor air cleaner is available</label>
-          <Switch
-            id="has-air-filter"
-            checked={profile.hasFilter}
-            disabled={busy}
-            onCheckedChange={(hasFilter) => updateProfile({ ...profile, hasFilter })}
-          />
+        <div className="plan-switches">
+          <div className="flexible-row">
+            <label htmlFor="flexible-timing">Outdoor timing is flexible</label>
+            <Switch
+              id="flexible-timing"
+              checked={profile.flexible}
+              disabled={busy}
+              onCheckedChange={(flexible) => updateProfile({ ...profile, flexible })}
+            />
+          </div>
+          <div className="flexible-row">
+            <label htmlFor="has-air-filter">An indoor air cleaner is available</label>
+            <Switch
+              id="has-air-filter"
+              checked={profile.hasFilter}
+              disabled={busy}
+              onCheckedChange={(hasFilter) => updateProfile({ ...profile, hasFilter })}
+            />
+          </div>
         </div>
       </fieldset>
 
@@ -162,7 +164,7 @@ export default function DailyPlan({ location, air, loading, advisory }: Props) {
           disabled={loading || busy || Boolean(aiActions)}
           onClick={() => void generate()}
         >
-          <Sparkles aria-hidden="true" />{" "}
+          {aiActions ? <Check aria-hidden="true" /> : <Sparkles aria-hidden="true" />}{" "}
           {busy ? "Generating…" : aiActions ? "AI plan ready" : "Generate AI plan"}
         </button>
         <button
@@ -174,17 +176,8 @@ export default function DailyPlan({ location, air, loading, advisory }: Props) {
           <Clipboard aria-hidden="true" /> Copy plan
         </button>
       </div>
-      <p className="reading-meta" role="status">
-        {loading
-          ? "Getting local air conditions…"
-          : busy
-            ? progress === null || progress >= 1
-              ? "Preparing your plan on this device…"
-              : `Downloading the AI model… ${Math.floor(progress * 100)}%`
-            : status ||
-              (!aiActions
-                ? "AI runs on this device. First use downloads about 110 MB."
-                : "AI selected the actions from published guidance.")}
+      <p className="plan-status" role="status">
+        {statusMessage()}
       </p>
 
       <ul className="action-list" aria-label={aiActions ? "AI plan" : "Quick plan"}>

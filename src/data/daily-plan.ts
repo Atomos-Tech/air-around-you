@@ -27,7 +27,7 @@ export const PLAN_SOURCES = {
   },
 } as const;
 
-const REVIEWED_ACTIONS = {
+const actions = {
   advisory: {
     title: "Check the local advisory before outdoor activity",
     impact:
@@ -134,44 +134,55 @@ const REVIEWED_ACTIONS = {
   },
 } satisfies Record<string, PlanAction>;
 
-const actions = REVIEWED_ACTIONS;
+const indoorActivityByAudience = {
+  Family: actions.indoorActivity,
+  School: actions.schoolActivity,
+  "Community group": actions.groupActivity,
+} satisfies Record<PlanProfile["audience"], PlanAction>;
 
+function outdoorOptions(aqi: number | null, { audience, flexible }: PlanProfile): ActionChoices {
+  if (aqi === null) return [actions.advisory];
+  const indoorActivity = indoorActivityByAudience[audience];
+  if (aqi > 150) {
+    return flexible
+      ? [indoorActivity, actions.delayOutdoor]
+      : [actions.shortOuting, indoorActivity];
+  }
+  if (aqi > 100) return [flexible ? actions.checkAgain : actions.lightActivity, indoorActivity];
+  return [actions.checkAgain, actions.advisory];
+}
+
+function indoorOptions(aqi: number | null, { audience, hasFilter }: PlanProfile): ActionChoices {
+  const alternative = audience === "Family" ? actions.lowerSmokeCooking : actions.skipSprays;
+  if (!hasFilter) return [actions.avoidIncense, alternative];
+  if (aqi !== null && aqi > 150) return [actions.useFilter, actions.cleanerRoom];
+  return [actions.useFilter, actions.avoidIncense, alternative];
+}
+
+function travelOptions(aqi: number | null, mode: PlanProfile["travel"]): ActionChoices {
+  switch (mode) {
+    case "Drive":
+      return [actions.combine, actions.idling, actions.share];
+    case "Transit or carpool":
+      return [actions.combine, actions.share];
+    case "Walk or cycle":
+      if (aqi !== null && aqi <= 100) return [actions.active, actions.combine];
+      return [actions.remote, actions.share, actions.combine];
+    case "Stay local":
+      return [actions.remote, actions.share, actions.combine];
+  }
+}
+
+// The first choice supplies the quick plan. AI selection uses the same ordered choices.
 export function planOptions(
   aqi: number | null,
   profile: PlanProfile,
-): readonly [ActionChoices, ActionChoices, ActionChoices] {
-  const indoorActivity =
-    profile.audience === "School"
-      ? actions.schoolActivity
-      : profile.audience === "Community group"
-        ? actions.groupActivity
-        : actions.indoorActivity;
-  const outdoor: ActionChoices =
-    aqi === null
-      ? [actions.advisory]
-      : aqi > 150
-        ? profile.flexible
-          ? [indoorActivity, actions.delayOutdoor]
-          : [actions.shortOuting, indoorActivity]
-        : aqi > 100
-          ? [profile.flexible ? actions.checkAgain : actions.lightActivity, indoorActivity]
-          : [actions.checkAgain, actions.advisory];
-  const indoorAlternative =
-    profile.audience === "Family" ? actions.lowerSmokeCooking : actions.skipSprays;
-  const indoor: ActionChoices = profile.hasFilter
-    ? aqi !== null && aqi > 150
-      ? [actions.useFilter, actions.cleanerRoom]
-      : [actions.useFilter, actions.avoidIncense, indoorAlternative]
-    : [actions.avoidIncense, indoorAlternative];
-  const travel: ActionChoices =
-    profile.travel === "Drive"
-      ? [actions.combine, actions.idling, actions.share]
-      : profile.travel === "Transit or carpool"
-        ? [actions.combine, actions.share]
-        : profile.travel === "Walk or cycle" && aqi !== null && aqi <= 100
-          ? [actions.active, actions.combine]
-          : [actions.remote, actions.share, actions.combine];
-  return [outdoor, indoor, travel];
+): readonly [outdoor: ActionChoices, indoor: ActionChoices, travel: ActionChoices] {
+  return [
+    outdoorOptions(aqi, profile),
+    indoorOptions(aqi, profile),
+    travelOptions(aqi, profile.travel),
+  ];
 }
 
 export function resolvePlan(
