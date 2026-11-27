@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 
+import DailyPlan from "@/components/DailyPlan";
 import {
   Dialog,
   DialogContent,
@@ -27,7 +28,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Switch } from "@/components/ui/switch";
 import { AIR_OBSERVATION_SOURCES, isCurrentObservation } from "@/data/air-observations";
 import {
   airCategory,
@@ -36,7 +36,6 @@ import {
   hasModeledFog,
   isDelayed,
   makePlace,
-  planFor,
   searchPlaces,
   type AirReading,
   type Environment,
@@ -47,6 +46,7 @@ import { findLocalCities, WORLD_CITIES } from "@/data/cities";
 import { useEnvironment } from "@/hooks/useEnvironment";
 
 const AirGlobe = lazy(() => import("@/components/AirGlobe"));
+const HOME_STORAGE_KEY = "air-around-you.home";
 const AIR_SOURCE = "https://open-meteo.com/en/docs/air-quality-api";
 const WEATHER_SOURCE = "https://open-meteo.com/en/docs";
 const GUIDANCE_SOURCE = "https://www.who.int/publications/i/item/WHO-EURO-2024-9115-48887-72806";
@@ -68,6 +68,19 @@ const EEA_COUNTRIES = new Set(
     " ",
   ),
 );
+
+function localAdvisory(countryCode: string | undefined) {
+  if (!countryCode) return null;
+  return (
+    OFFICIAL_MONITOR_LINKS[countryCode] ??
+    (EEA_COUNTRIES.has(countryCode)
+      ? {
+          name: "European Environment Agency monitoring map",
+          url: "https://airindex.eea.europa.eu/AQI/",
+        }
+      : null)
+  );
+}
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -94,7 +107,6 @@ function AirQualityExperience() {
   const [mapError, setMapError] = useState(false);
   const [paused, setPaused] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
-  const [flexible, setFlexible] = useState(false);
   const locationRequest = useRef(0);
 
   const { value: conditions, loading } = useEnvironment(place);
@@ -119,6 +131,37 @@ function AirQualityExperience() {
   };
 
   useEffect(() => {
+    try {
+      const saved: unknown = JSON.parse(localStorage.getItem(HOME_STORAGE_KEY) ?? "null");
+      if (!saved || typeof saved !== "object") return;
+      const { id, name, region, longitude, latitude, countryCode } =
+        saved as Partial<PlaceSelection>;
+      if (
+        typeof id === "string" &&
+        typeof name === "string" &&
+        typeof region === "string" &&
+        typeof longitude === "number" &&
+        Number.isFinite(longitude) &&
+        Math.abs(longitude) <= 180 &&
+        typeof latitude === "number" &&
+        Number.isFinite(latitude) &&
+        Math.abs(latitude) <= 90
+      ) {
+        setHome({
+          id,
+          name,
+          region,
+          longitude,
+          latitude,
+          ...(typeof countryCode === "string" ? { countryCode } : {}),
+        });
+      }
+    } catch {
+      // Home can still be selected for this session if browser storage is unavailable.
+    }
+  }, []);
+
+  useEffect(() => {
     const query = window.matchMedia("(prefers-reduced-motion: reduce)");
     const change = () => setReducedMotion(query.matches);
     change();
@@ -126,15 +169,23 @@ function AirQualityExperience() {
     return () => query.removeEventListener("change", change);
   }, []);
 
-  function visit(next: PlaceSelection, makeHome = false) {
+  function visit(next: PlaceSelection) {
     locationRequest.current += 1;
     setPlace(next);
-    setHome((current) => (makeHome ? next : (current ?? next)));
     setView("street");
     setPin(null);
     setSheet(null);
     setGeoMessage(null);
     setLocating(false);
+  }
+
+  function chooseHome(location: PlaceSelection) {
+    setHome(location);
+    try {
+      localStorage.setItem(HOME_STORAGE_KEY, JSON.stringify(location));
+    } catch {
+      // The in-memory reference remains available for this session.
+    }
   }
 
   function findMe() {
@@ -151,7 +202,6 @@ function AirQualityExperience() {
         if (locationRequest.current !== request) return;
         visit(
           makePlace({ longitude: coords.longitude, latitude: coords.latitude }, coords.accuracy),
-          true,
         );
       },
       () => {
@@ -388,7 +438,7 @@ function AirQualityExperience() {
               >
                 Today’s plan <ArrowDownRight aria-hidden="true" />
               </button>
-              {!isHome && (
+              {!isHome && home && (
                 <button
                   type="button"
                   className="map-button"
@@ -399,12 +449,14 @@ function AirQualityExperience() {
                 </button>
               )}
             </div>
-            {!isHome && home && (
+            {!isHome && (
               <div className="home-tools">
-                <button type="button" onClick={() => visit(home)}>
-                  <House aria-hidden="true" /> Return home
-                </button>
-                <button type="button" onClick={() => setHome(place)}>
+                {home && (
+                  <button type="button" onClick={() => visit(home)}>
+                    <House aria-hidden="true" /> Return home
+                  </button>
+                )}
+                <button type="button" onClick={() => chooseHome(place)}>
                   Set as home
                 </button>
               </div>
@@ -426,6 +478,11 @@ function AirQualityExperience() {
               >
                 Explore a place <ArrowUpRight aria-hidden="true" />
               </button>
+              {home && (
+                <button type="button" className="map-button" onClick={() => visit(home)}>
+                  <House aria-hidden="true" /> Return home
+                </button>
+              )}
             </div>
             <div className="featured-inline" aria-label="Places to explore">
               {WORLD_CITIES.slice(0, 3).map((item) => (
@@ -493,27 +550,25 @@ function AirQualityExperience() {
       <Dialog open={sheet === "plan"} onOpenChange={closeSheet}>
         <DialogContent className="experience-dialog">
           <DialogHeader>
-            <DialogTitle>Today’s plan</DialogTitle>
+            <DialogTitle>Today’s air plan</DialogTitle>
             <DialogDescription>
-              {place?.name} · Outdoor exposure, indoor air, and travel · Uses modeled US AQI
+              {place?.name} · Choose how your family or group spends the day.
             </DialogDescription>
           </DialogHeader>
-          <div className="flexible-row">
-            <label htmlFor="flexible-timing">My outdoor timing is flexible</label>
-            <Switch id="flexible-timing" checked={flexible} onCheckedChange={setFlexible} />
-          </div>
-          <ul className="action-list">
-            {planFor(availableConditions.air?.usAqi ?? null, flexible).map((action) => (
-              <li key={action.category}>
-                <span>{action.category}</span>
-                <h3>{action.title}</h3>
-                <p>{action.impact}</p>
-              </li>
-            ))}
-          </ul>
-          <a className="guidance-link" href={GUIDANCE_SOURCE} target="_blank" rel="noreferrer">
-            WHO guidance <ArrowUpRight aria-hidden="true" />
-          </a>
+          {place && (
+            <DailyPlan
+              key={place.id}
+              location={place.name}
+              air={availableConditions.air}
+              loading={loading}
+              advisory={
+                localAdvisory(place.countryCode) ?? {
+                  name: "WHO air pollution guidance",
+                  url: GUIDANCE_SOURCE,
+                }
+              }
+            />
+          )}
         </DialogContent>
       </Dialog>
     </main>
@@ -621,15 +676,7 @@ function AirDetails({
 }) {
   const { air, weather, observation } = conditions;
   const observationSource = observation ? AIR_OBSERVATION_SOURCES[observation.source] : null;
-  const official =
-    countryCode &&
-    (OFFICIAL_MONITOR_LINKS[countryCode] ??
-      (EEA_COUNTRIES.has(countryCode)
-        ? {
-            name: "European Environment Agency monitoring map",
-            url: "https://airindex.eea.europa.eu/AQI/",
-          }
-        : null));
+  const official = localAdvisory(countryCode);
   const pollutants: Array<[string, number | null]> = air
     ? [
         ["Fine particles (PM₂.₅)", air.pm25],

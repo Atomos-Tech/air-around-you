@@ -38,12 +38,6 @@ export type Environment = {
   observation?: Pm25Observation | null;
 };
 
-type Action = {
-  category: string;
-  title: string;
-  impact: string;
-};
-
 export function makePlace(point: MapPoint, accuracyMeters?: number): PlaceSelection {
   const { latitude } = point;
   const longitude = wrapLongitude(point.longitude);
@@ -235,34 +229,4 @@ export function formatTime(timestamp: number) {
 
 export function compassDirection(degrees: number) {
   return ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.round(degrees / 45) % 8];
-}
-
-export function planFor(aqi: number | null, flexible: boolean): Action[] {
-  const outdoorTitle =
-    aqi === null
-      ? "Check a local advisory before strenuous activity"
-      : aqi > 150 || (aqi > 100 && flexible)
-        ? "Choose a cleaner indoor space for strenuous activity"
-        : "Choose a route away from heavy traffic";
-  const outdoorImpact =
-    aqi === null
-      ? "Local advisories can provide guidance when the model estimate is delayed or unavailable."
-      : aqi > 150 || (aqi > 100 && flexible)
-        ? "This can reduce exposure when indoor air is cleaner."
-        : "A quieter route can reduce time beside a source of outdoor particles.";
-
-  return [
-    { category: "Outdoor plans", title: outdoorTitle, impact: outdoorImpact },
-    {
-      category: "Indoor air",
-      title: "Skip burning incense",
-      impact: "That removes one source of particles from the air inside your home.",
-    },
-    {
-      category: "Lower-emission travel",
-      title: "Combine errands or take transit if practical",
-      impact:
-        "Replacing separate car trips can reduce the distance driven and the emissions from those trips.",
-    },
-  ];
 }

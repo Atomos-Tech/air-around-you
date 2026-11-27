@@ -8,7 +8,10 @@ import { Route } from "@/routes/index";
 vi.mock("@/components/AirGlobe", () => ({ default: () => null }));
 vi.mock("@/hooks/useEnvironment", () => ({ useEnvironment: vi.fn() }));
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  localStorage.clear();
+});
 
 it("shows modeled US AQI on the card alongside a measured PM₂.₅ reading", () => {
   vi.stubGlobal("matchMedia", () => ({
@@ -47,4 +50,33 @@ it("shows modeled US AQI on the card alongside a measured PM₂.₅ reading", ()
   expect(card.getByText("170")).toBeTruthy();
   expect(card.getByText("CAMS global")).toBeTruthy();
   expect(card.getByText("CPCB station")).toBeTruthy();
+});
+
+it("sets Home only on explicit selection and restores the reference after reopening", () => {
+  vi.stubGlobal("matchMedia", () => ({
+    matches: false,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }));
+  vi.mocked(useEnvironment).mockReturnValue({
+    value: { air: null, weather: null },
+    loading: false,
+  });
+  const Home = Route.options.component;
+  if (!Home) throw new Error("The home route has no component");
+  const firstVisit = render(<Home />);
+  fireEvent.click(screen.getByRole("button", { name: "New Delhi" }));
+  expect(screen.getByText("Visiting", { exact: true })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Compare with Home" })).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: /^Explore$/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Tokyo Japan" }));
+  fireEvent.click(screen.getByRole("button", { name: "Set as home" }));
+  expect(screen.getByText("Home", { exact: true })).toBeTruthy();
+  firstVisit.unmount();
+
+  render(<Home />);
+  fireEvent.click(screen.getByRole("button", { name: "Return home" }));
+  expect(screen.getByRole("heading", { name: "Tokyo" })).toBeTruthy();
+  expect(screen.getByText("Home", { exact: true })).toBeTruthy();
 });

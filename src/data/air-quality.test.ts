@@ -6,7 +6,6 @@ import {
   isDelayed,
   makePlace,
   modelCoordinate,
-  planFor,
 } from "@/data/air-quality";
 
 afterEach(() => {
@@ -184,10 +183,8 @@ describe("environment providers", () => {
   });
 });
 
-describe("today’s plan", () => {
-  it("uses reviewed uncertainty guidance when current air is unavailable", () => {
-    expect(planFor(null, false)[0]?.title).toMatch(/local advisory/);
-    expect(planFor(160, false)[0]?.title).toMatch(/cleaner indoor space/);
+describe("model freshness", () => {
+  it("flags estimates older than two hours", () => {
     expect(isDelayed(Date.parse("2026-11-27T10:00Z"), Date.parse("2026-11-27T12:01Z"))).toBe(true);
   });
 });

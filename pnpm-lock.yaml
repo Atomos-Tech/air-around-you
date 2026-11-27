@@ -25,6 +25,9 @@ importers:
       '@tanstack/react-start':
         specifier: 1.168.61
         version: 1.168.61(@types/react@19.2.17)(crossws@0.4.17(srvx@1.0.8))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rolldown@1.2.1)(vite@8.1.7(@types/node@22.20.1)(jiti@2.7.0))
+      '@wllama/wllama':
+        specifier: 4.0.0
+        version: 4.0.0
       clsx:
         specifier: 2.1.1
         version: 2.1.1
@@ -1050,6 +1053,9 @@ packages:
 
   '@webgpu/types@0.1.74':
     resolution: {integrity: sha512-lgiI4hbuLcI9unnm2cL/tvCaQU45dp0xcLWJh5uB/9MBGvIA4F8XIk7nSiBeg+K4xWGYwgZKn80LmERI5CxoTA==}
+
+  '@wllama/wllama@4.0.0':
+    resolution: {integrity: sha512-fIDWRlHPT9J+kLQouL0PPSVYfrnNz3WkKRA2QvJCW+gd8Fk50MNfe1tj/per7EG60CQwd8gFvaK/DoHHzttnJA==}
 
   abab@2.0.6:
     resolution: {integrity: sha512-j2afSsaIENvHZN2B8GOpF566vZ5WVk5opAiMTvWgaQT8DkbOqsTfvNAvHoRGU2zzP8cPoqys+xHTRDWW8L+/BA==}
@@ -3398,6 +3404,8 @@ snapshots:
       tinyrainbow: 3.2.0
 
   '@webgpu/types@0.1.74': {}
+
+  '@wllama/wllama@4.0.0': {}
 
   abab@2.0.6: {}
 
