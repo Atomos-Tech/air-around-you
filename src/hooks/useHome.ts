@@ -1,24 +1,21 @@
 import { useEffect, useState } from "react";
 
-import type { PlaceSelection } from "@/data/air-quality";
+import type { PlaceSelection } from "@/data/places";
+import { isRecord, isLatitude, isLongitude } from "@/data/validation";
 
 const HOME_STORAGE_KEY = "air-around-you.home";
-
-function inRange(value: unknown, limit: number): value is number {
-  return typeof value === "number" && Math.abs(value) <= limit;
-}
 
 function readHome(): PlaceSelection | null {
   try {
     const saved: unknown = JSON.parse(localStorage.getItem(HOME_STORAGE_KEY) ?? "null");
-    if (!saved || typeof saved !== "object") return null;
-    const { id, name, region, longitude, latitude, countryCode } = saved as Partial<PlaceSelection>;
+    if (!isRecord(saved)) return null;
+    const { id, name, region, longitude, latitude, countryCode } = saved;
     if (
       typeof id !== "string" ||
       typeof name !== "string" ||
       typeof region !== "string" ||
-      !inRange(longitude, 180) ||
-      !inRange(latitude, 90)
+      !isLongitude(longitude) ||
+      !isLatitude(latitude)
     ) {
       return null;
     }

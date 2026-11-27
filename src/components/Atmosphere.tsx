@@ -42,6 +42,16 @@ function paintMist(
   context.restore();
 }
 
+function hazeAppearance(visibility: number | null, fog: boolean, particulate: number) {
+  const reducedVisibility = visibility === null ? 0 : Math.max(0, 1 - visibility / 9_000);
+  const moisture = fog ? 0.1 + reducedVisibility * 0.06 : reducedVisibility * 0.07;
+  const particleHaze = Math.min(0.125, (Math.max(0, particulate - 8) / 170) * 0.16);
+  return {
+    opacity: Math.max(moisture, particleHaze),
+    color: fog || moisture >= particleHaze ? "225,237,239" : "179,151,115",
+  };
+}
+
 export default function Atmosphere({ conditions, paused, getLocalView }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const { air, weather } = conditions;
@@ -68,6 +78,8 @@ export default function Atmosphere({ conditions, paused, getLocalView }: Props) 
     const context = canvas.getContext("2d");
     if (!context) return;
 
+    const velocity = windFrom === null || speed === null ? 0 : Math.min(speed * 3.6, 112);
+    const haze = hazeAppearance(visibility, fog, particulate);
     const wind = Array.from({ length: 52 }, particle);
     const dustSpecks = Array.from(
       { length: dust >= 0.25 ? Math.min(56, Math.round(Math.sqrt(dust) * 8)) : 0 },
@@ -91,7 +103,6 @@ export default function Atmosphere({ conditions, paused, getLocalView }: Props) 
 
       // The provider reports where the wind comes from. Convert that bearing into its direction of travel.
       const heading = (((windFrom ?? 0) + 180 - view.bearing) * Math.PI) / 180;
-      const velocity = windFrom === null || speed === null ? 0 : Math.min(speed * 3.6, 112);
       const dx = Math.sin(heading) * velocity;
       const dy =
         -Math.cos(heading) * velocity * Math.max(0.33, Math.cos((view.pitch * Math.PI) / 180));
@@ -115,16 +126,19 @@ export default function Atmosphere({ conditions, paused, getLocalView }: Props) 
         }
       }
 
-      const reducedVisibility = visibility === null ? 0 : Math.max(0, 1 - visibility / 9_000);
-      const moisture = fog ? 0.1 + reducedVisibility * 0.06 : reducedVisibility * 0.07;
-      const particleHaze = Math.min(0.125, (Math.max(0, particulate - 8) / 170) * 0.16);
-      const haze = Math.max(moisture, particleHaze);
-      if (haze > 0.005) {
-        const mistColor = fog || moisture >= particleHaze ? "225,237,239" : "179,151,115";
+      if (haze.opacity > 0.005) {
         for (let index = 0; index < 3; index += 1) {
           const x = (wrap(index * 0.44 + (driftX / width) * 0.22) * 1.52 - 0.26) * width;
           const y = height * (0.28 + index * 0.105) + Math.max(-28, Math.min(28, driftY * 0.11));
-          paintMist(context, x, y, width * 0.5, height * (0.11 + index * 0.018), mistColor, haze);
+          paintMist(
+            context,
+            x,
+            y,
+            width * 0.5,
+            height * (0.11 + index * 0.018),
+            haze.color,
+            haze.opacity,
+          );
         }
       }
 

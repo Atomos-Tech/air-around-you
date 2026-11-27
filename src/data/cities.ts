@@ -1,4 +1,4 @@
-import type { PlaceSelection } from "./air-quality";
+import type { PlaceSelection } from "./places";
 
 type City = [
   id: string,

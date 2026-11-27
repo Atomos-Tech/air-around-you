@@ -1,14 +1,10 @@
-import { fetchPm25Observation, type Pm25Observation } from "./air-observations";
-
-export type MapPoint = { longitude: number; latitude: number };
-
-export type PlaceSelection = MapPoint & {
-  id: string;
-  name: string;
-  region: string;
-  countryCode?: string;
-  accuracyMeters?: number;
-};
+import { modelCoordinate, type MapPoint } from "./places";
+import { isRecord, nonnegative } from "./validation";
+import {
+  fetchPm25Observation,
+  isCurrentObservation,
+  type Pm25Observation,
+} from "./air-observations";
 
 export type AirReading = {
   timestamp: number;
@@ -38,37 +34,6 @@ export type Environment = {
   observation?: Pm25Observation | null;
 };
 
-export function makePlace(point: MapPoint, accuracyMeters?: number): PlaceSelection {
-  const { latitude } = point;
-  const longitude = wrapLongitude(point.longitude);
-  return {
-    latitude,
-    longitude,
-    id: `${latitude.toFixed(5)}:${longitude.toFixed(5)}`,
-    name: accuracyMeters === undefined ? "Dropped pin" : "Your location",
-    region: `${Math.abs(latitude).toFixed(2)}°${latitude < 0 ? "S" : "N"} · ${Math.abs(longitude).toFixed(2)}°${longitude < 0 ? "W" : "E"}`,
-    ...(accuracyMeters === undefined ? {} : { accuracyMeters }),
-  };
-}
-
-function wrapLongitude(longitude: number) {
-  return ((((longitude + 180) % 360) + 360) % 360) - 180;
-}
-
-export function modelCoordinate(point: MapPoint): MapPoint {
-  // The precise geolocation stays on the device. Use a coarse request point for both feeds.
-  return {
-    latitude: Math.round(point.latitude * 10) / 10,
-    longitude: wrapLongitude(Math.round(point.longitude * 10) / 10),
-  };
-}
-
-function nonnegative(value: unknown, max = Infinity): number | null {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= max
-    ? value
-    : null;
-}
-
 async function requestCurrent(
   base: string,
   point: MapPoint,
@@ -88,9 +53,11 @@ async function requestCurrent(
 
   const response = await fetch(url, { signal });
   if (!response.ok) throw new Error(`Conditions request failed (${response.status})`);
-  const { current } = (await response.json()) as { current?: Record<string, unknown> };
-  const time = current?.["time"];
-  if (!current || typeof time !== "string") throw new Error("Provider time missing");
+  const payload: unknown = await response.json();
+  const current = isRecord(payload) ? payload["current"] : null;
+  if (!isRecord(current)) throw new Error("Provider reading missing");
+  const time = current["time"];
+  if (typeof time !== "string") throw new Error("Provider time missing");
   const timestamp = Date.parse(time.endsWith("Z") ? time : `${time}Z`);
   if (!Number.isFinite(timestamp)) throw new Error("Provider time invalid");
   return { current, timestamp };
@@ -135,28 +102,34 @@ async function fetchAir(point: MapPoint, signal: AbortSignal): Promise<AirReadin
   });
 }
 
+async function fetchWeather(point: MapPoint, signal: AbortSignal): Promise<WeatherReading> {
+  const { timestamp, current } = await requestCurrent(
+    "https://api.open-meteo.com/v1/forecast",
+    point,
+    "wind_speed_10m,wind_direction_10m,cloud_cover,visibility,weather_code",
+    signal,
+    { models: "best_match" },
+  );
+  return {
+    timestamp,
+    windSpeed: nonnegative(current["wind_speed_10m"]),
+    windFrom: nonnegative(current["wind_direction_10m"], 360),
+    cloudCover: nonnegative(current["cloud_cover"], 100),
+    visibility: nonnegative(current["visibility"]),
+    code: nonnegative(current["weather_code"], 99),
+  };
+}
+
 export async function fetchEnvironment(
   point: MapPoint,
   signal: AbortSignal,
   observationPoint = point,
 ): Promise<Environment> {
+  const grid = modelCoordinate(point);
   const [air, weather, observation] = await Promise.allSettled([
-    fetchAir(point, signal),
-    requestCurrent(
-      "https://api.open-meteo.com/v1/forecast",
-      point,
-      "wind_speed_10m,wind_direction_10m,cloud_cover,visibility,weather_code",
-      signal,
-      { models: "best_match" },
-    ).then(({ timestamp, current }) => ({
-      timestamp,
-      windSpeed: nonnegative(current["wind_speed_10m"]),
-      windFrom: nonnegative(current["wind_direction_10m"], 360),
-      cloudCover: nonnegative(current["cloud_cover"], 100),
-      visibility: nonnegative(current["visibility"]),
-      code: nonnegative(current["weather_code"], 99),
-    })),
-    fetchPm25Observation(observationPoint, modelCoordinate(point), signal),
+    fetchAir(grid, signal),
+    fetchWeather(grid, signal),
+    fetchPm25Observation(observationPoint, grid, signal),
   ]);
 
   return {
@@ -166,41 +139,18 @@ export async function fetchEnvironment(
   };
 }
 
-export async function searchPlaces(query: string, signal: AbortSignal): Promise<PlaceSelection[]> {
-  const url = new URL("https://geocoding-api.open-meteo.com/v1/search");
-  url.search = new URLSearchParams({
-    name: query,
-    count: "16",
-    language: "en",
-    format: "json",
-  }).toString();
-  const response = await fetch(url, { signal });
-  if (!response.ok) throw new Error("Place search is unavailable");
-  const { results = [] } = (await response.json()) as {
-    results?: Array<
-      MapPoint & {
-        id: number;
-        name: string;
-        country?: string;
-        country_code?: string;
-        admin1?: string;
-      }
-    >;
-  };
-  return results
-    .filter((place) => Number.isFinite(place.latitude) && Number.isFinite(place.longitude))
-    .map(({ id, name, country, country_code, admin1, latitude, longitude }) => ({
-      id: String(id),
-      name,
-      latitude,
-      longitude,
-      region: [admin1, country].filter(Boolean).join(", "),
-      ...(country_code ? { countryCode: country_code } : {}),
-    }));
-}
-
 export function isDelayed(timestamp: number, now = Date.now()) {
   return now - timestamp > 2 * 60 * 60 * 1000;
+}
+
+// Historical estimates may still be displayed with their timestamps. Only current
+// readings drive the animated scene and the air plan.
+export function currentEnvironment({ air, weather, observation }: Environment, now = Date.now()) {
+  return {
+    air: air && !isDelayed(air.timestamp, now) ? air : null,
+    weather: weather && !isDelayed(weather.timestamp, now) ? weather : null,
+    observation: observation && isCurrentObservation(observation, now) ? observation : null,
+  };
 }
 
 export function hasModeledFog(code: number | null | undefined) {

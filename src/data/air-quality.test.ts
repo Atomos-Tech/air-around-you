@@ -1,12 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  fetchEnvironment,
-  hasModeledFog,
-  isDelayed,
-  makePlace,
-  modelCoordinate,
-} from "@/data/air-quality";
+import { fetchEnvironment, hasModeledFog, isDelayed } from "@/data/air-quality";
+import { makePlace, modelCoordinate, searchPlaces } from "@/data/places";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -114,6 +109,7 @@ describe("environment providers", () => {
         if (String(url).includes("snapdata.dev"))
           return Response.json({
             records: [
+              null,
               { ...station, station: "Stale", updated_at: "2026-11-27T03:00Z" },
               { ...station, station: "Future", updated_at: "2026-11-27T13:00Z" },
               { ...station, station: "Non-reporting", avg: null, updated_at: "2026-11-27T11:00Z" },
@@ -153,6 +149,7 @@ describe("environment providers", () => {
         return Response.json({
           data: {
             regionMetadata: [
+              { name: "unmapped", labelLocation: null },
               { name: "north", labelLocation: { latitude: 1.41803, longitude: 103.82 } },
               { name: "central", labelLocation: { latitude: 1.35735, longitude: 103.82 } },
             ],
@@ -181,6 +178,81 @@ describe("environment providers", () => {
       /1\.3521|103\.8198/,
     );
   });
+
+  it("keeps valid AirNow readings when other rows have invalid units or missing station data", async () => {
+    const station = {
+      SiteName: "Downtown",
+      PM25_Unit: "UG/M3",
+      PM25: 0,
+      Latitude: 40.7128,
+      Longitude: -74.006,
+      ValidTime: Date.now(),
+    };
+    const request = vi.fn(async (url: URL) => {
+      if (url.hostname === "services.arcgis.com")
+        return Response.json({
+          features: [
+            { attributes: null },
+            { attributes: { ...station, PM25_Unit: "PPM" } },
+            { attributes: station },
+          ],
+        });
+      return Response.json({ current: { time: "2026-11-27T12:00", pm2_5: 9 } });
+    });
+    vi.stubGlobal("fetch", request);
+    const result = await fetchEnvironment(
+      { latitude: 40.712851, longitude: -74.006128 },
+      new AbortController().signal,
+    );
+    expect(result.observation).toMatchObject({ source: "airnow", area: "Downtown", pm25: 0 });
+    const urls = request.mock.calls.map(([url]) => url);
+    expect(urls.map(String).join(" ")).not.toMatch(/40\.712851|-74\.006128/);
+    const geometry = urls
+      .find((url) => url.hostname === "services.arcgis.com")
+      ?.searchParams.get("geometry");
+    if (!geometry) throw new Error("AirNow request is missing its search area");
+    const [west, south, east, north] = geometry.split(",").map(Number);
+    if (west === undefined || south === undefined || east === undefined || north === undefined) {
+      throw new Error("AirNow requires four bounding coordinates");
+    }
+    expect((west + east) / 2).toBeCloseTo(-74.0, 3);
+    expect((south + north) / 2).toBeCloseTo(40.7, 3);
+  });
+});
+
+it("retains usable worldwide search results when the geocoder returns malformed rows", async () => {
+  const city = {
+    id: 123,
+    name: "Example city",
+    latitude: 0,
+    longitude: 180,
+    country_code: "GB",
+    country: "United Kingdom",
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      Response.json({
+        results: [
+          null,
+          { ...city, latitude: 91 },
+          { ...city, id: undefined },
+          { ...city, name: {} },
+          city,
+        ],
+      }),
+    ),
+  );
+  expect(await searchPlaces("Example", new AbortController().signal)).toEqual([
+    {
+      id: "123",
+      name: "Example city",
+      latitude: 0,
+      longitude: 180,
+      countryCode: "GB",
+      region: "United Kingdom",
+    },
+  ]);
 });
 
 describe("model freshness", () => {

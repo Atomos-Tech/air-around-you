@@ -17,8 +17,8 @@ import AirDetails from "@/components/AirDetails";
 import ConditionsCard from "@/components/ConditionsCard";
 import ExperienceDialog from "@/components/ExperienceDialog";
 import PlaceSearch from "@/components/PlaceSearch";
-import { isCurrentObservation } from "@/data/air-observations";
-import { isDelayed, makePlace, type MapPoint, type PlaceSelection } from "@/data/air-quality";
+import { currentEnvironment } from "@/data/air-quality";
+import { makePlace, type MapPoint, type PlaceSelection } from "@/data/places";
 import { localAdvisory, WHO_ADVISORY } from "@/data/air-sources";
 import { WORLD_CITIES } from "@/data/cities";
 import { useEnvironment } from "@/hooks/useEnvironment";
@@ -56,17 +56,8 @@ function AirQualityExperience() {
 
   const { value: conditions, loading } = useEnvironment(place);
 
-  const { air, weather, observation } = conditions;
-  const readings = {
-    air,
-    weather,
-    observation: observation && isCurrentObservation(observation) ? observation : null,
-  };
-  const currentReadings = {
-    ...readings,
-    air: air && !isDelayed(air.timestamp) ? air : null,
-    weather: weather && !isDelayed(weather.timestamp) ? weather : null,
-  };
+  const currentReadings = currentEnvironment(conditions);
+  const readings = { ...conditions, observation: currentReadings.observation };
   const closeSheet = () => setSheet(null);
 
   useEffect(() => {
@@ -292,7 +283,7 @@ function AirQualityExperience() {
         description="Compare modeled PM₂.₅ across both locations."
       >
         {sheet === "compare" && home && place && (
-          <AirComparison home={home} place={place} air={air} loading={loading} />
+          <AirComparison home={home} place={place} air={conditions.air} loading={loading} />
         )}
       </ExperienceDialog>
 

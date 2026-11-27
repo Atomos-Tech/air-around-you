@@ -8,8 +8,8 @@ import {
   hasModeledFog,
   isDelayed,
   type Environment,
-  type PlaceSelection,
 } from "@/data/air-quality";
+import type { PlaceSelection } from "@/data/places";
 import { WEATHER_SOURCE } from "@/data/air-sources";
 import AirModelCredit from "./AirModelCredit";
 

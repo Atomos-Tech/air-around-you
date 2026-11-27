@@ -1,4 +1,5 @@
-import type { MapPoint } from "./air-quality";
+import type { MapPoint } from "./places";
+import { isLatitude, isLongitude, isRecord, nonnegative } from "./validation";
 
 export const AIR_OBSERVATION_SOURCES = {
   cpcb: {
@@ -36,15 +37,7 @@ export function isCurrentObservation(reading: Pm25Observation, now = Date.now())
 }
 
 function distanceKm(point: MapPoint, latitude: unknown, longitude: unknown) {
-  if (
-    typeof latitude !== "number" ||
-    !Number.isFinite(latitude) ||
-    Math.abs(latitude) > 90 ||
-    typeof longitude !== "number" ||
-    !Number.isFinite(longitude) ||
-    Math.abs(longitude) > 180
-  )
-    return Infinity;
+  if (!isLatitude(latitude) || !isLongitude(longitude)) return Infinity;
   const radians = Math.PI / 180;
   const halfLatitude = ((latitude - point.latitude) * radians) / 2;
   const halfLongitude = ((longitude - point.longitude) * radians) / 2;
@@ -56,68 +49,68 @@ function distanceKm(point: MapPoint, latitude: unknown, longitude: unknown) {
   return 12_742 * Math.asin(Math.sqrt(Math.min(1, sineSquared)));
 }
 
+type StationRecord = {
+  value: unknown;
+  timestamp: unknown;
+  name: unknown;
+  latitude: unknown;
+  longitude: unknown;
+};
+
+// Normalize only the rows we visit. A malformed station should never discard
+// the other stations in a regional feed.
 function chooseNearest(
   source: Pm25Observation["source"],
-  records: ReadonlyArray<{
-    value: unknown;
-    timestamp: unknown;
-    name: unknown;
-    latitude: unknown;
-    longitude: unknown;
-  }>,
   point: MapPoint,
-  range: number,
+  rows: unknown,
+  normalize: (row: Record<string, unknown>) => StationRecord | null,
 ) {
+  if (!Array.isArray(rows)) return null;
   let nearest: Pm25Observation | null = null;
-  let closest = range;
+  let closestKm = 20;
   const now = Date.now();
-  for (const { value, timestamp, name, latitude, longitude } of records) {
+  for (const row of rows) {
+    const station = isRecord(row) ? normalize(row) : null;
+    if (!station) continue;
+    const pm25 = nonnegative(station.value);
     if (
-      typeof value !== "number" ||
-      !Number.isFinite(value) ||
-      value < 0 ||
-      typeof timestamp !== "number" ||
-      !Number.isFinite(timestamp) ||
-      typeof name !== "string" ||
-      !name.trim()
+      pm25 === null ||
+      typeof station.name !== "string" ||
+      !station.name.trim() ||
+      typeof station.timestamp !== "number"
     )
       continue;
-    const distance = distanceKm(point, latitude, longitude);
-    if (distance >= closest) continue;
-    const observation = {
-      source,
-      pm25: value,
-      timestamp,
-      area: name,
-    };
+    const observation = { source, pm25, timestamp: station.timestamp, area: station.name };
     if (!isCurrentObservation(observation, now)) continue;
-    nearest = observation;
-    closest = distance;
+    const distance = distanceKm(point, station.latitude, station.longitude);
+    if (distance < closestKm) {
+      nearest = observation;
+      closestKm = distance;
+    }
   }
   return nearest;
 }
 
-async function readJson<T>(url: URL | string, signal: AbortSignal): Promise<T> {
+async function readFeed(url: URL | string, signal: AbortSignal) {
   const response = await fetch(url, { signal });
   if (!response.ok) throw new Error("Observation feed unavailable");
-  return (await response.json()) as T;
+  const payload: unknown = await response.json();
+  if (!isRecord(payload)) throw new Error("Invalid observation feed");
+  return payload;
 }
 
 async function checkIndia(point: MapPoint, signal: AbortSignal) {
-  const { records } = await readJson<{ records?: Array<Record<string, unknown>> }>(
-    "https://snapdata.dev/api/v1/aqi/in/latest.json",
-    signal,
-  );
-  const candidates = (records ?? [])
-    .filter((record) => record["pollutant"] === "PM2.5")
-    .map((record) => ({
-      value: record["avg"],
-      timestamp: typeof record["updated_at"] === "string" ? Date.parse(record["updated_at"]) : NaN,
-      name: record["station"],
-      latitude: record["latitude"],
-      longitude: record["longitude"],
-    }));
-  return chooseNearest("cpcb", candidates, point, 20);
+  const feed = await readFeed("https://snapdata.dev/api/v1/aqi/in/latest.json", signal);
+  return chooseNearest("cpcb", point, feed["records"], (row) => {
+    if (row["pollutant"] !== "PM2.5" || typeof row["updated_at"] !== "string") return null;
+    return {
+      value: row["avg"],
+      timestamp: Date.parse(row["updated_at"]),
+      name: row["station"],
+      latitude: row["latitude"],
+      longitude: row["longitude"],
+    };
+  });
 }
 
 async function checkAirNow(point: MapPoint, requestPoint: MapPoint, signal: AbortSignal) {
@@ -137,46 +130,38 @@ async function checkAirNow(point: MapPoint, requestPoint: MapPoint, signal: Abor
     returnGeometry: "false",
     outFields: "SiteName,Latitude,Longitude,PM25,PM25_Unit,ValidTime",
   }).toString();
-  const { features } = await readJson<{
-    features?: Array<{ attributes: Record<string, unknown> }>;
-  }>(url, signal);
-  const candidates = (features ?? []).map(({ attributes }) => ({
-    value: attributes["PM25_Unit"] === "UG/M3" ? attributes["PM25"] : null,
-    timestamp: attributes["ValidTime"],
-    name: attributes["SiteName"],
-    latitude: attributes["Latitude"],
-    longitude: attributes["Longitude"],
-  }));
-  return chooseNearest("airnow", candidates, point, 20);
+  const feed = await readFeed(url, signal);
+  return chooseNearest("airnow", point, feed["features"], ({ attributes }) => {
+    if (!isRecord(attributes) || attributes["PM25_Unit"] !== "UG/M3") return null;
+    return {
+      value: attributes["PM25"],
+      timestamp: attributes["ValidTime"],
+      name: attributes["SiteName"],
+      latitude: attributes["Latitude"],
+      longitude: attributes["Longitude"],
+    };
+  });
 }
 
-async function checkSingapore(
-  point: MapPoint,
-  signal: AbortSignal,
-): Promise<Pm25Observation | null> {
-  type NeaPayload = {
-    data?: {
-      items?: Array<{ timestamp: string; readings: { pm25_one_hourly: Record<string, number> } }>;
-      regionMetadata?: Array<{ name: string; labelLocation: MapPoint }>;
+async function checkSingapore(point: MapPoint, signal: AbortSignal) {
+  const { data } = await readFeed("https://api-open.data.gov.sg/v2/real-time/api/pm25", signal);
+  if (!isRecord(data) || !Array.isArray(data["items"])) return null;
+  const item: unknown = data["items"][0];
+  if (!isRecord(item) || typeof item["timestamp"] !== "string" || !isRecord(item["readings"]))
+    return null;
+  const values = item["readings"]["pm25_one_hourly"];
+  if (!isRecord(values)) return null;
+  const timestamp = Date.parse(item["timestamp"]);
+  return chooseNearest("nea", point, data["regionMetadata"], ({ name, labelLocation }) => {
+    if (typeof name !== "string" || !name || !isRecord(labelLocation)) return null;
+    return {
+      latitude: labelLocation["latitude"],
+      longitude: labelLocation["longitude"],
+      name: `Singapore · ${name} region`,
+      value: values[name],
+      timestamp,
     };
-  };
-  const { data } = await readJson<NeaPayload>(
-    "https://api-open.data.gov.sg/v2/real-time/api/pm25",
-    signal,
-  );
-  const item = data?.items?.[0];
-  if (!item || !data?.regionMetadata) return null;
-  return chooseNearest(
-    "nea",
-    data.regionMetadata.map(({ name, labelLocation }) => ({
-      ...labelLocation,
-      name: name ? `Singapore · ${name} region` : "",
-      timestamp: Date.parse(item.timestamp),
-      value: item.readings?.pm25_one_hourly?.[name],
-    })),
-    point,
-    20,
-  );
+  });
 }
 
 export function observationSourceFor(point: MapPoint) {

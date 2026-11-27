@@ -1,6 +1,7 @@
 import { CircleHelp } from "lucide-react";
 
-import { formatTime, type AirReading, type PlaceSelection } from "@/data/air-quality";
+import { formatTime, type AirReading } from "@/data/air-quality";
+import type { PlaceSelection } from "@/data/places";
 import { useEnvironment } from "@/hooks/useEnvironment";
 import AirModelCredit from "./AirModelCredit";
 

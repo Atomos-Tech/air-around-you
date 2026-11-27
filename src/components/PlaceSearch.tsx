@@ -1,7 +1,7 @@
 import { ChevronRight, MapPin, Search } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 
-import { searchPlaces, type PlaceSelection } from "@/data/air-quality";
+import { searchPlaces, type PlaceSelection } from "@/data/places";
 import { findLocalCities } from "@/data/cities";
 
 export default function PlaceSearch({ onPick }: { onPick: (location: PlaceSelection) => void }) {
