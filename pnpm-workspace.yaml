@@ -1,0 +1,4 @@
+overrides:
+  "@rolldown/binding-wasm32-wasi>@napi-rs/wasm-runtime": 1.2.0
+  rolldown: 1.2.1
+  shell-quote: ">=1.11.0"
