@@ -305,20 +305,29 @@ function AirQualityExperience() {
             <div className="air-summary" aria-live="polite">
               {loading ? (
                 <p className="status-copy">Getting air conditions…</p>
-              ) : pm25 != null ? (
+              ) : (
                 <>
-                  <div className="pm-value">
-                    {Math.round(pm25 * 10) / 10} <span>µg/m³ PM₂.₅</span>
+                  <div className="aqi-summary">
+                    {air?.usAqi != null ? (
+                      <p className="aqi-reading" data-severity={category.severity}>
+                        <span className="aqi-dot" aria-hidden="true" />
+                        <span>
+                          <strong>{Math.round(air.usAqi)} modeled US AQI</strong> · {category.label}
+                        </span>
+                      </p>
+                    ) : (
+                      <p className="reading-meta">Modeled US AQI unavailable.</p>
+                    )}
+                    {measured && air?.usAqi != null && <AirModelCredit air={air} />}
                   </div>
-                  {!measured && air?.usAqi != null && (
-                    <p className="aqi-reading" data-severity={category.severity}>
-                      <span aria-hidden="true" /> {category.label} · {Math.round(air.usAqi)} modeled
-                      US AQI
-                    </p>
+                  {pm25 != null ? (
+                    <div className="pm-value">
+                      {Math.round(pm25 * 10) / 10} <span>µg/m³ PM₂.₅</span>
+                    </div>
+                  ) : (
+                    <p className="status-copy">PM₂.₅ unavailable for this point.</p>
                   )}
                 </>
-              ) : (
-                <p className="status-copy">PM₂.₅ unavailable for this point.</p>
               )}
               {measured ? (
                 <p className="reading-meta">

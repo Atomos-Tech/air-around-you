@@ -334,14 +334,16 @@
     letter-spacing: normal;
     white-space: nowrap;
   }
+  .aqi-summary {
+    margin-bottom: 0.65rem;
+  }
   .aqi-reading {
     display: flex;
     align-items: center;
     gap: 0.36rem;
-    margin-top: 0.4rem;
     color: #f4ffa9;
-    font-size: 0.73rem;
-    font-weight: 600;
+    font-size: 0.82rem;
+    line-height: 1.35;
   }
   .aqi-reading[data-severity="good"] {
     color: #bcebd7;
@@ -354,7 +356,8 @@
   .aqi-reading[data-severity="hazardous"] {
     color: #ffbba9;
   }
-  .aqi-reading > span {
+  .aqi-dot {
+    flex: none;
     width: 0.42rem;
     height: 0.42rem;
     border-radius: 50%;
