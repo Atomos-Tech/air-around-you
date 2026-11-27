@@ -1,21 +1,25 @@
 import { ClientOnly, createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState, Suspense, lazy } from "react";
 import {
-  Activity,
   ArrowDownRight,
+  ArrowLeftRight,
   ArrowUpRight,
-  Check,
+  ChevronRight,
   CircleHelp,
-  CloudSun,
-  Home,
+  Cloud,
+  Globe2,
+  House,
+  Info,
   LocateFixed,
   MapPin,
+  Mountain,
   Pause,
   Play,
+  Search,
+  Wind,
+  X,
 } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 
-import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -23,542 +27,707 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
+import { AIR_OBSERVATION_SOURCES, isCurrentObservation } from "@/data/air-observations";
 import {
-  getSamplePlan,
-  getWindDirectionBucket,
-  makeUnmeasuredPlace,
-  SAMPLE_AVERAGING_WINDOW,
-  SAMPLE_LOCATIONS,
-  SAMPLE_TIMESTAMP_LABEL,
+  airCategory,
+  compassDirection,
+  formatTime,
+  hasModeledFog,
+  isDelayed,
+  makePlace,
+  planFor,
+  searchPlaces,
+  type AirReading,
+  type Environment,
   type MapPoint,
   type PlaceSelection,
 } from "@/data/air-quality";
+import { findLocalCities, WORLD_CITIES } from "@/data/cities";
+import { useEnvironment } from "@/hooks/useEnvironment";
 
 const AirGlobe = lazy(() => import("@/components/AirGlobe"));
+const AIR_SOURCE = "https://open-meteo.com/en/docs/air-quality-api";
+const WEATHER_SOURCE = "https://open-meteo.com/en/docs";
+const GUIDANCE_SOURCE = "https://www.who.int/publications/i/item/WHO-EURO-2024-9115-48887-72806";
+const OFFICIAL_MONITOR_LINKS: Record<string, { name: string; url: string }> = {
+  IN: { name: "India’s CPCB monitoring map", url: "https://airquality.cpcb.gov.in/AQI_India/" },
+  US: { name: "U.S. EPA AirNow monitoring map", url: "https://www.airnow.gov/" },
+  JP: {
+    name: "Japan’s Ministry of the Environment monitoring portal",
+    url: "https://www.env.go.jp/air/portal.html",
+  },
+  GB: { name: "UK Defra air quality", url: "https://uk-air.defra.gov.uk/" },
+  SG: {
+    name: "Singapore NEA monitoring feed",
+    url: "https://guide.data.gov.sg/developer-guide/real-time-apis",
+  },
+};
+const EEA_COUNTRIES = new Set(
+  "AT BE BG CH CY CZ DE DK EE ES FI FR GR HR HU IE IS IT LI LT LU LV MT NL NO PL PT RO SE SI SK".split(
+    " ",
+  ),
+);
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Air Around You — Urban Air Quality" },
+      { title: "Air Around You — Explore the air on Earth" },
       {
         name: "description",
         content:
-          "Explore the air around you on an interactive globe, compare sample readings, and choose a practical action for today.",
+          "Explore a real Earth map, compare current air estimates around the world, and find practical next steps.",
       },
-      { property: "og:title", content: "Air Around You — Urban Air Quality" },
-      {
-        property: "og:description",
-        content:
-          "Explore the air around you on an interactive globe, compare sample readings, and choose a practical action for today.",
-      },
-      { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
   component: AirQualityExperience,
 });
 
 function AirQualityExperience() {
-  const [activePlace, setActivePlace] = useState<PlaceSelection | null>(null);
-  const [homePlace, setHomePlace] = useState<PlaceSelection | null>(null);
-  const [pendingPoint, setPendingPoint] = useState<MapPoint | null>(null);
-  const [locationMessage, setLocationMessage] = useState<string | null>(null);
+  const [place, setPlace] = useState<PlaceSelection | null>(null);
+  const [home, setHome] = useState<PlaceSelection | null>(null);
+  const [pin, setPin] = useState<MapPoint | null>(null);
+  const [view, setView] = useState<"globe" | "street">("globe");
+  const [sheet, setSheet] = useState<"search" | "air" | "compare" | "plan" | null>(null);
+  const [geoMessage, setGeoMessage] = useState<string | null>(null);
+  const [locating, setLocating] = useState(false);
   const [mapError, setMapError] = useState(false);
-  const [comparisonOpen, setComparisonOpen] = useState(false);
-  const [planOpen, setPlanOpen] = useState(false);
-  const [timingFlexible, setTimingFlexible] = useState(false);
-  const [breathingPaused, setBreathingPaused] = useState(false);
+  const [paused, setPaused] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
-  const [breathPhase, setBreathPhase] = useState<"inhale" | "exhale">("inhale");
+  const [flexible, setFlexible] = useState(false);
+  const locationRequest = useRef(0);
 
-  useEffect(() => {
-    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const updatePreference = () => setReducedMotion(media.matches);
-    updatePreference();
-    media.addEventListener("change", updatePreference);
-    return () => media.removeEventListener("change", updatePreference);
-  }, []);
-
-  useEffect(() => {
-    if (reducedMotion || breathingPaused) return;
-    const timer = window.setInterval(() => {
-      setBreathPhase((phase) => (phase === "inhale" ? "exhale" : "inhale"));
-    }, 4000);
-    return () => window.clearInterval(timer);
-  }, [breathingPaused, reducedMotion]);
-
-  const isHome = activePlace !== null && activePlace.id === homePlace?.id;
-  const isVisiting = activePlace !== null && homePlace !== null && !isHome;
-  const planActions = useMemo(
-    () => getSamplePlan(activePlace?.pm25 ?? null, timingFlexible),
-    [activePlace?.pm25, timingFlexible],
+  const { value: conditions, loading } = useEnvironment(place);
+  const { value: homeConditions, loading: homeLoading } = useEnvironment(
+    sheet === "compare" ? home : null,
   );
-
-  const chooseSample = (sample: PlaceSelection) => {
-    if (homePlace === null) setHomePlace(sample);
-    setActivePlace(sample);
-    setPendingPoint(null);
-    setLocationMessage(null);
+  const { air, weather, observation } = conditions;
+  const measured = observation && isCurrentObservation(observation) ? observation : null;
+  const pm25 = measured?.pm25 ?? air?.pm25;
+  const stopMotion = paused || reducedMotion;
+  const isHome = place !== null && place.id === home?.id;
+  const airDelayed = air !== null && isDelayed(air.timestamp);
+  const weatherDelayed = weather !== null && isDelayed(weather.timestamp);
+  const availableConditions = {
+    air: airDelayed ? null : air,
+    weather: weatherDelayed ? null : weather,
+    observation: measured,
+  };
+  const category = airCategory(air?.usAqi);
+  const closeSheet = (open: boolean) => {
+    if (!open) setSheet(null);
   };
 
-  const requestLocation = () => {
-    setLocationMessage(null);
+  useEffect(() => {
+    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const change = () => setReducedMotion(query.matches);
+    change();
+    query.addEventListener("change", change);
+    return () => query.removeEventListener("change", change);
+  }, []);
+
+  function visit(next: PlaceSelection, makeHome = false) {
+    locationRequest.current += 1;
+    setPlace(next);
+    setHome((current) => (makeHome ? next : (current ?? next)));
+    setView("street");
+    setPin(null);
+    setSheet(null);
+    setGeoMessage(null);
+    setLocating(false);
+  }
+
+  function findMe() {
     if (!navigator.geolocation) {
-      setLocationMessage(
-        "Location is unavailable here. Choose a sample place or tap the map to drop a pin.",
-      );
+      setGeoMessage("This browser has no location service. Search for a place or drop a pin.");
       return;
     }
 
+    const request = ++locationRequest.current;
+    setGeoMessage(null);
+    setLocating(true);
     navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const place = makeUnmeasuredPlace(
-          "device",
-          {
-            longitude: position.coords.longitude,
-            latitude: position.coords.latitude,
-          },
-          position.coords.accuracy,
+      ({ coords }) => {
+        if (locationRequest.current !== request) return;
+        visit(
+          makePlace({ longitude: coords.longitude, latitude: coords.latitude }, coords.accuracy),
+          true,
         );
-        setHomePlace(place);
-        setActivePlace(place);
-        setPendingPoint(null);
       },
       () => {
-        setLocationMessage(
-          "Location wasn’t shared. Choose a sample place or tap the map to drop a pin.",
-        );
+        if (locationRequest.current !== request) return;
+        setLocating(false);
+        setGeoMessage("Location wasn’t shared. Search for a place or drop a pin.");
       },
-      { enableHighAccuracy: false, timeout: 12000, maximumAge: 60000 },
+      { enableHighAccuracy: true, timeout: 12_000, maximumAge: 60_000 },
     );
-  };
+  }
 
-  const handleMapPick = useCallback((point: MapPoint) => {
-    setPendingPoint(point);
-    setLocationMessage(null);
+  const pickPoint = useCallback((point: MapPoint) => {
+    setPin(point);
+    setGeoMessage(null);
   }, []);
 
-  const standHere = () => {
-    if (!pendingPoint) return;
-    const place = makeUnmeasuredPlace("pin", pendingPoint, null);
-    setActivePlace(place);
-    setPendingPoint(null);
-  };
-
-  const returnHome = () => {
-    if (!homePlace) return;
-    setActivePlace(homePlace);
-    setPendingPoint(null);
-    setPlanOpen(false);
-  };
-
-  const windBucket =
-    activePlace?.windDirectionDeg === null || activePlace?.windDirectionDeg === undefined
-      ? null
-      : getWindDirectionBucket(activePlace.windDirectionDeg);
-  const windSpeed = activePlace?.windSpeedKmh;
-  const speedClass =
-    windSpeed === null || windSpeed === undefined
-      ? null
-      : windSpeed < 10
-        ? "calm"
-        : windSpeed < 17
-          ? "steady"
-          : "breezy";
-  const canCompare = homePlace !== null && activePlace !== null && !isHome;
-
   return (
-    <main className="air-app" data-breathing-paused={breathingPaused} data-plan-open={planOpen}>
+    <main className="experience" data-view={view}>
       <div className="map-stage">
         <ClientOnly fallback={<div className="map-loading">Opening Earth…</div>}>
           <Suspense fallback={<div className="map-loading">Opening Earth…</div>}>
             <AirGlobe
-              place={activePlace}
-              pendingPoint={pendingPoint}
-              onMapPick={handleMapPick}
+              place={place}
+              pendingPoint={pin}
+              view={view}
+              conditions={availableConditions}
+              paused={stopMotion}
+              onMapPick={pickPoint}
               onMapError={setMapError}
             />
           </Suspense>
         </ClientOnly>
       </div>
 
-      {activePlace?.windDirectionDeg !== null && activePlace?.windDirectionDeg !== undefined && (
-        <div
-          className="air-atmosphere"
-          data-wind-direction={windBucket}
-          data-wind-speed={speedClass}
-          aria-hidden="true"
+      <header className="experience-header">
+        <button
+          type="button"
+          className="brand"
+          aria-label="Air Around You, return to globe"
+          onClick={() => setView("globe")}
         >
-          <span className="air-cloud-band" />
-          <span className="air-cloud-band" />
-          <span className="wind-trail" />
-          <span className="wind-trail" />
-          <span className="wind-trail" />
-          <span className="wind-trail" />
-          <span className="wind-trail" />
-          <span className="wind-trail" />
-          <span className="wind-trail" />
-          <span className="air-haze-wash" />
-          {activePlace.dustLevel === "present" && (
-            <div>
-              <span className="dust-speck" />
-              <span className="dust-speck" />
-              <span className="dust-speck" />
-              <span className="dust-speck" />
-              <span className="dust-speck" />
-            </div>
-          )}
-        </div>
-      )}
-
-      <header className="air-topbar">
-        <div className="air-brand">
-          <span className="brand-mark">
-            <Activity aria-hidden="true" className="h-4 w-4" />
-          </span>
+          <img src="/favicon.png" alt="" />
           <span>Air Around You</span>
+        </button>
+        <div className="header-actions">
+          <button type="button" className="map-button" onClick={() => setSheet("search")}>
+            <Search aria-hidden="true" />
+            <span>Explore</span>
+          </button>
+          <button
+            type="button"
+            className="map-button map-button-primary"
+            onClick={findMe}
+            disabled={locating}
+          >
+            <LocateFixed aria-hidden="true" />
+            <span>{locating ? "Finding…" : "Find me"}</span>
+          </button>
         </div>
-        <div className="air-topbar-note">Sample data · educational view</div>
       </header>
 
-      <aside className="air-panel" aria-label="Location selection and air summary">
-        <div className="air-panel-scroll">
-          <div className="panel-kicker">
-            <CloudSun aria-hidden="true" className="mr-1 inline h-3.5 w-3.5" />
-            {activePlace
-              ? isHome
-                ? "Air around home"
-                : isVisiting
-                  ? "Visiting"
-                  : "Selected place"
-              : "A world of air"}
-          </div>
-          <h1 className="air-title">What are you breathing today?</h1>
-          <p className="air-subtitle">
-            Explore a place, see its sample air reading, and choose one practical step for today.
-          </p>
-
-          <div className="primary-actions">
-            <Button onClick={requestLocation} aria-label="Find my location">
-              <LocateFixed aria-hidden="true" /> Find me
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => {
-                const firstSample = SAMPLE_LOCATIONS[0];
-                if (firstSample) chooseSample(firstSample);
-              }}
-            >
-              <MapPin aria-hidden="true" /> Try a sample location
-            </Button>
-          </div>
-
-          {locationMessage && (
-            <p className="geo-message" role="status">
-              {locationMessage}
-            </p>
-          )}
-
-          <section className="sample-section" aria-labelledby="sample-places-title">
-            <div className="section-heading">
-              <span id="sample-places-title">Sample places</span>
-              <span className="sample-tag">Sample data</span>
-            </div>
-            <div className="sample-list">
-              {SAMPLE_LOCATIONS.map((sample) => {
-                const selected = activePlace?.id === sample.id;
-                return (
-                  <Button
-                    key={sample.id}
-                    variant={selected ? "default" : "outline"}
-                    className="sample-place-button"
-                    aria-pressed={selected}
-                    onClick={() => chooseSample(sample)}
-                  >
-                    {sample.name}
-                  </Button>
-                );
-              })}
-            </div>
-          </section>
-
-          {pendingPoint && (
-            <section className="movement-section" aria-label="Selected map point">
-              <div className="place-line">
-                <div>
-                  <div className="eyebrow">Pin selected</div>
-                  <p className="place-name">
-                    {pendingPoint.latitude.toFixed(3)}°, {pendingPoint.longitude.toFixed(3)}°
-                  </p>
-                </div>
-                <MapPin aria-hidden="true" className="mt-1 h-5 w-5 text-accent" />
-              </div>
-              <div className="place-actions">
-                <Button onClick={standHere}>
-                  <Check aria-hidden="true" /> Stand here
-                </Button>
-                <Button variant="ghost" onClick={() => setPendingPoint(null)}>
-                  Cancel pin
-                </Button>
-              </div>
-            </section>
-          )}
-
-          {activePlace && (
-            <>
-              <section className="air-reading-section" aria-labelledby="reading-title">
-                <div className="place-line">
-                  <div>
-                    <div className="eyebrow">
-                      {isHome ? "Home" : isVisiting ? "Visiting" : "Current place"}
-                    </div>
-                    <h2 className="place-name" id="reading-title">
-                      {activePlace.name}
-                    </h2>
-                    <p className="place-region">{activePlace.region}</p>
-                  </div>
-                  {activePlace.source === "sample" && (
-                    <span className="sample-tag">Sample data</span>
-                  )}
-                  {activePlace.source === "device" && (
-                    <span className="mode-tag">GPS accuracy</span>
-                  )}
-                </div>
-
-                {activePlace.pm25 === null ? (
-                  <div className="reading-row">
-                    <CircleHelp aria-hidden="true" className="h-5 w-5 text-muted-foreground" />
-                    <span className="reading-label">Air data unavailable</span>
-                  </div>
-                ) : (
-                  <>
-                    <div className="reading-row">
-                      <span className="reading-value">{activePlace.pm25}</span>
-                      <span className="reading-unit">µg/m³</span>
-                    </div>
-                    <div className="reading-label">PM₂.₅ · sample reading</div>
-                    <p className="reading-meta">
-                      {SAMPLE_TIMESTAMP_LABEL} · {activePlace.averagingWindow}
-                    </p>
-                  </>
-                )}
-
-                {activePlace.source === "device" && activePlace.accuracyMeters !== null && (
-                  <p className="reading-meta">
-                    Approximate location accuracy ±{Math.round(activePlace.accuracyMeters)} m.
-                    Coordinates stay in this browser.
-                  </p>
-                )}
-
-                {activePlace.windSpeedKmh !== null && (
-                  <p className="reading-meta">
-                    Sample wind · {activePlace.windSpeedKmh} km/h · {activePlace.hazeLabel} haze
-                  </p>
-                )}
-
-                <Button
-                  className="sample-plan-button"
-                  variant="secondary"
-                  aria-expanded={planOpen}
-                  onClick={() => setPlanOpen((open) => !open)}
-                >
-                  <span>What can I do today?</span>
-                  {planOpen ? (
-                    <ArrowDownRight aria-hidden="true" />
-                  ) : (
-                    <ArrowUpRight aria-hidden="true" />
-                  )}
-                </Button>
-
-                <div className="place-actions">
-                  {!isHome && (
-                    <Button variant="outline" size="sm" onClick={() => setHomePlace(activePlace)}>
-                      <Home aria-hidden="true" /> Set as Home
-                    </Button>
-                  )}
-                  {isVisiting && (
-                    <Button variant="ghost" size="sm" onClick={returnHome}>
-                      <Home aria-hidden="true" /> Return Home
-                    </Button>
-                  )}
-                  {homePlace &&
-                    activePlace.id === homePlace.id &&
-                    homePlace.source === "device" && (
-                      <span className="microcopy">Your location is Home on this device.</span>
-                    )}
-                  {canCompare && (
-                    <Button variant="ghost" size="sm" onClick={() => setComparisonOpen(true)}>
-                      Compare with Home
-                    </Button>
-                  )}
-                </div>
-              </section>
-
-              <section className="breath-section" aria-labelledby="breath-title">
-                <div className="breath-header">
-                  <div>
-                    <div className="section-heading mb-1" id="breath-title">
-                      A breath, in motion
-                    </div>
-                    <div className="breath-state">
-                      {reducedMotion
-                        ? "Motion reduced"
-                        : breathingPaused
-                          ? "Breathing paused"
-                          : breathPhase === "inhale"
-                            ? "Inhale"
-                            : "Exhale"}
-                    </div>
-                  </div>
-                  {!reducedMotion && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label={
-                        breathingPaused ? "Resume breathing animation" : "Pause breathing animation"
-                      }
-                      title={
-                        breathingPaused ? "Resume breathing animation" : "Pause breathing animation"
-                      }
-                      onClick={() => setBreathingPaused((paused) => !paused)}
-                    >
-                      {breathingPaused ? <Play aria-hidden="true" /> : <Pause aria-hidden="true" />}
-                    </Button>
-                  )}
-                </div>
-                <p className="breath-copy">
-                  {reducedMotion ? (
-                    <>
-                      Static view: air enters the airways as you inhale; carbon dioxide leaves with
-                      each exhale.
-                    </>
-                  ) : breathingPaused ? (
-                    <>
-                      The avatar is resting. <strong>Inhale:</strong> air enters the airways and
-                      oxygen moves into the blood. <strong>Exhale:</strong> carbon dioxide leaves
-                      with the breath.
-                    </>
-                  ) : breathPhase === "inhale" ? (
-                    <>
-                      <strong>Air enters the airways;</strong> oxygen moves into the blood.
-                    </>
-                  ) : (
-                    <>
-                      <strong>Carbon dioxide leaves</strong> with the breath.
-                    </>
-                  )}
-                </p>
-              </section>
-
-              {activePlace.pm25 !== null && (
-                <section className="education-section" aria-label="About particle pollution">
-                  <div className="section-heading">
-                    <span>About particles</span>
-                    <span className="sample-tag">Sample data</span>
-                  </div>
-                  <p className="education-copy">
-                    Particle pollution can <strong>irritate airways</strong> and make breathing less
-                    comfortable for some people. This is general context, not a personal health
-                    reading or diagnosis.
-                  </p>
-                </section>
-              )}
-
-              {planOpen && (
-                <section className="plan-section" aria-labelledby="plan-title">
-                  <div className="section-heading">
-                    <span id="plan-title">A small plan for today</span>
-                    <span className="sample-tag">Sample guidance</span>
-                  </div>
-                  <div className="flexible-row">
-                    <label className="flexible-label" htmlFor="flexible-timing">
-                      My outdoor timing is flexible
-                    </label>
-                    <Switch
-                      id="flexible-timing"
-                      checked={timingFlexible}
-                      onCheckedChange={setTimingFlexible}
-                      aria-label="My outdoor timing is flexible"
-                    />
-                  </div>
-                  <ul className="plan-list">
-                    {planActions.map((action) => (
-                      <li className="plan-item" key={action.category}>
-                        <div className="eyebrow">{action.category}</div>
-                        <div className="plan-item-title">{action.title}</div>
-                        <p className="plan-item-impact">{action.impact}</p>
-                      </li>
-                    ))}
-                  </ul>
-                  <p className="microcopy">Illustrative sample guidance; not medical advice.</p>
-                </section>
-              )}
-            </>
-          )}
-
-          {!activePlace && (
-            <section className="movement-section">
-              <div className="section-heading">
-                <span>Choose a place to begin</span>
-              </div>
-              <p className="microcopy">
-                Tap a sample city, find your location, or tap anywhere on the globe to place a pin.
-              </p>
-            </section>
-          )}
+      {geoMessage && (
+        <div className="map-notice" role="status">
+          {geoMessage}
         </div>
-      </aside>
-
+      )}
       {mapError && (
-        <div className="map-error-banner" role="status">
-          The map didn’t load. Your selected place, readings, and actions remain available here.
+        <div className="map-notice" role="status">
+          Some map imagery couldn’t load. You can still explore readings by place.
         </div>
       )}
 
-      <Dialog open={comparisonOpen} onOpenChange={setComparisonOpen}>
-        <DialogContent className="compare-dialog">
+      <div className="view-controls" role="group" aria-label="Map view">
+        <button type="button" aria-pressed={view === "globe"} onClick={() => setView("globe")}>
+          <Globe2 aria-hidden="true" /> Globe
+        </button>
+        <button
+          type="button"
+          aria-pressed={view === "street"}
+          onClick={() => (place ? setView("street") : setSheet("search"))}
+        >
+          <Mountain aria-hidden="true" /> 3D view
+        </button>
+        {place && view === "street" && !reducedMotion && (
+          <button
+            type="button"
+            className="motion-control"
+            aria-label={paused ? "Resume scene motion" : "Pause scene motion"}
+            title={paused ? "Resume scene motion" : "Pause scene motion"}
+            onClick={() => setPaused((value) => !value)}
+          >
+            {paused ? <Play aria-hidden="true" /> : <Pause aria-hidden="true" />}
+          </button>
+        )}
+      </div>
+
+      <div className="experience-content">
+        {pin ? (
+          <section className="surface pin-card" aria-label="Selected map point">
+            <div>
+              <h1>Explore this spot</h1>
+              <p>
+                {pin.latitude.toFixed(3)}°, {pin.longitude.toFixed(3)}°
+              </p>
+            </div>
+            <div className="card-actions">
+              <button
+                type="button"
+                className="map-button map-button-primary"
+                onClick={() => visit(makePlace(pin))}
+              >
+                Stand here
+              </button>
+              <button
+                type="button"
+                className="icon-tool"
+                aria-label="Cancel pin"
+                onClick={() => setPin(null)}
+              >
+                <X aria-hidden="true" />
+              </button>
+            </div>
+          </section>
+        ) : place ? (
+          <aside className="surface conditions-card" aria-label="Air around the selected location">
+            <div className="place-heading">
+              <div>
+                <span className="place-role">{isHome ? "Home" : "Visiting"}</span>
+                <h1>{place.name}</h1>
+                <p>{place.region}</p>
+              </div>
+              <button
+                type="button"
+                className="data-label"
+                aria-label="Air data details"
+                onClick={() => setSheet("air")}
+              >
+                {measured
+                  ? measured.source === "nea"
+                    ? "Monitor network"
+                    : "Station reading"
+                  : air
+                    ? airDelayed
+                      ? "Estimate delayed"
+                      : "Model estimate"
+                    : "Air data"}
+                <Info aria-hidden="true" />
+              </button>
+            </div>
+
+            <div className="air-summary" aria-live="polite">
+              {loading ? (
+                <p className="status-copy">Getting air conditions…</p>
+              ) : pm25 != null ? (
+                <>
+                  <div className="pm-value">
+                    {Math.round(pm25 * 10) / 10} <span>µg/m³ PM₂.₅</span>
+                  </div>
+                  {!measured && air?.usAqi != null && (
+                    <p className="aqi-reading" data-severity={category.severity}>
+                      <span aria-hidden="true" /> {category.label} · {Math.round(air.usAqi)} modeled
+                      US AQI
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p className="status-copy">PM₂.₅ unavailable for this point.</p>
+              )}
+              {measured ? (
+                <p className="reading-meta">
+                  <a
+                    href={AIR_OBSERVATION_SOURCES[measured.source].url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {AIR_OBSERVATION_SOURCES[measured.source].name}
+                  </a>
+                  {" · "}
+                  {measured.area} · {formatTime(measured.timestamp)}
+                </p>
+              ) : (
+                air && <AirModelCredit air={air} />
+              )}
+              {place.accuracyMeters !== undefined && (
+                <p className="reading-meta">
+                  Device accuracy ±{Math.round(place.accuracyMeters)} m
+                </p>
+              )}
+            </div>
+
+            {(weather || air?.dust != null) && (
+              <div className="weather-strip">
+                <div>
+                  {weather?.windSpeed != null && weather.windFrom !== null && (
+                    <span>
+                      <Wind aria-hidden="true" /> {weather.windSpeed} km/h from{" "}
+                      {compassDirection(weather.windFrom)}
+                    </span>
+                  )}
+                  {weather?.cloudCover != null && (
+                    <span>
+                      <Cloud aria-hidden="true" /> {weather.cloudCover}% cloud
+                    </span>
+                  )}
+                  {hasModeledFog(weather?.code) && <span>Fog modeled</span>}
+                  {air?.dust != null && <span>Dust {air.dust} µg/m³</span>}
+                </div>
+                {weather && (
+                  <p className="reading-meta">
+                    <a href={WEATHER_SOURCE} target="_blank" rel="noreferrer">
+                      Open-Meteo weather
+                    </a>{" "}
+                    · {formatTime(weather.timestamp)}
+                    {weatherDelayed ? " · delayed" : ""}
+                  </p>
+                )}
+              </div>
+            )}
+
+            <div className="card-actions">
+              <button
+                type="button"
+                className="map-button map-button-primary"
+                onClick={() => setSheet("plan")}
+              >
+                Today’s plan <ArrowDownRight aria-hidden="true" />
+              </button>
+              {!isHome && (
+                <button
+                  type="button"
+                  className="map-button"
+                  onClick={() => setSheet("compare")}
+                  aria-label="Compare with Home"
+                >
+                  <ArrowLeftRight aria-hidden="true" /> Compare
+                </button>
+              )}
+            </div>
+            {!isHome && home && (
+              <div className="home-tools">
+                <button type="button" onClick={() => visit(home)}>
+                  <House aria-hidden="true" /> Return home
+                </button>
+                <button type="button" onClick={() => setHome(place)}>
+                  Set as home
+                </button>
+              </div>
+            )}
+          </aside>
+        ) : (
+          <section className="intro">
+            <h1>
+              See the air
+              <br />
+              around you.
+            </h1>
+            <p>Fly to a place, see its outdoor air, and compare it with home.</p>
+            <div className="card-actions">
+              <button
+                type="button"
+                className="map-button map-button-primary"
+                onClick={() => setSheet("search")}
+              >
+                Explore a place <ArrowUpRight aria-hidden="true" />
+              </button>
+            </div>
+            <div className="featured-inline" aria-label="Places to explore">
+              {WORLD_CITIES.slice(0, 3).map((item) => (
+                <button key={item.id} type="button" onClick={() => visit(item)}>
+                  {item.name}
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+      </div>
+
+      <Dialog open={sheet === "search"} onOpenChange={closeSheet}>
+        <DialogContent className="experience-dialog">
           <DialogHeader>
-            <DialogTitle className="compare-heading">Compare with Home</DialogTitle>
-            <DialogDescription>A side-by-side look at the sample PM₂.₅ readings.</DialogDescription>
+            <DialogTitle>Explore a place</DialogTitle>
+            <DialogDescription>
+              Browse {WORLD_CITIES.length} featured cities, search worldwide, or choose any point on
+              the map.
+            </DialogDescription>
           </DialogHeader>
-          {homePlace && activePlace && (
-            <div className="compare-grid">
-              <ComparePlace place={homePlace} label="Home" />
-              <ComparePlace place={activePlace} label="Visiting" />
+          {sheet === "search" && <PlaceSearch onPick={visit} />}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={sheet === "air"} onOpenChange={closeSheet}>
+        <DialogContent className="experience-dialog">
+          <DialogHeader>
+            <DialogTitle>Air around {place?.name ?? "this place"}</DialogTitle>
+            <DialogDescription>Outdoor conditions for the selected area.</DialogDescription>
+          </DialogHeader>
+          <AirDetails
+            conditions={{ ...conditions, observation: measured }}
+            loading={loading}
+            countryCode={place?.countryCode}
+          />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={sheet === "compare"} onOpenChange={closeSheet}>
+        <DialogContent className="experience-dialog">
+          <DialogHeader>
+            <DialogTitle>Compare with home</DialogTitle>
+            <DialogDescription>Compare modeled PM₂.₅ across both locations.</DialogDescription>
+          </DialogHeader>
+          {home && place && (
+            <div className="comparison">
+              <CompareReading
+                label="Home"
+                place={home}
+                air={homeConditions.air}
+                loading={homeLoading}
+              />
+              <CompareReading label="Visiting" place={place} air={air} loading={loading} />
             </div>
           )}
-          {homePlace?.pm25 !== null &&
-            activePlace?.pm25 !== null &&
-            homePlace?.source === "sample" &&
-            activePlace?.source === "sample" &&
-            homePlace.timestampUtc === activePlace.timestampUtc &&
-            homePlace.averagingWindow === activePlace.averagingWindow && (
-              <p className="microcopy">
-                Same sample timestamp: {SAMPLE_TIMESTAMP_LABEL} · same window:{" "}
-                {SAMPLE_AVERAGING_WINDOW}.
-              </p>
-            )}
+          <p className="reading-meta">
+            {homeConditions.air && air && homeConditions.air.timestamp === air.timestamp
+              ? `Same estimate time · ${formatTime(air.timestamp)}`
+              : "Each estimate shows its own model time."}
+          </p>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={sheet === "plan"} onOpenChange={closeSheet}>
+        <DialogContent className="experience-dialog">
+          <DialogHeader>
+            <DialogTitle>Today’s plan</DialogTitle>
+            <DialogDescription>
+              {place?.name} · Outdoor exposure, indoor air, and travel · Uses modeled US AQI
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flexible-row">
+            <label htmlFor="flexible-timing">My outdoor timing is flexible</label>
+            <Switch id="flexible-timing" checked={flexible} onCheckedChange={setFlexible} />
+          </div>
+          <ul className="action-list">
+            {planFor(availableConditions.air?.usAqi ?? null, flexible).map((action) => (
+              <li key={action.category}>
+                <span>{action.category}</span>
+                <h3>{action.title}</h3>
+                <p>{action.impact}</p>
+              </li>
+            ))}
+          </ul>
+          <a className="guidance-link" href={GUIDANCE_SOURCE} target="_blank" rel="noreferrer">
+            WHO guidance <ArrowUpRight aria-hidden="true" />
+          </a>
         </DialogContent>
       </Dialog>
     </main>
   );
 }
 
-function ComparePlace({ place, label }: { place: PlaceSelection; label: string }) {
+function PlaceSearch({ onPick }: { onPick: (location: PlaceSelection) => void }) {
+  const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<PlaceSelection[] | null>(null);
+  const [status, setStatus] = useState("");
+  const requestRef = useRef<AbortController | null>(null);
+  useEffect(() => () => requestRef.current?.abort(), []);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const term = query.trim();
+    if (term.length < 2) return;
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
+    setStatus("Finding places…");
+    setHits(null);
+    try {
+      const places = await searchPlaces(
+        term,
+        AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]),
+      );
+      if (controller.signal.aborted) return;
+      setHits(places);
+      setStatus(places.length ? "" : "No cities matched. Try a nearby city or drop a pin.");
+    } catch {
+      if (!controller.signal.aborted)
+        setStatus("Worldwide search is unavailable. Browse featured cities or drop a pin.");
+    }
+  }
+
   return (
-    <div className="compare-place">
-      <div className="eyebrow">{label}</div>
-      <div className="place-name">{place.name}</div>
-      <p className="place-region">{place.region}</p>
-      {place.pm25 === null ? (
-        <p className="reading-meta">Air data unavailable</p>
-      ) : (
-        <>
-          <div className="compare-value">{place.pm25}</div>
-          <div className="reading-unit">µg/m³ · PM₂.₅</div>
-          <p className="reading-meta">Sample data</p>
-        </>
+    <>
+      <form className="place-search" onSubmit={submit}>
+        <input
+          aria-label="City name"
+          autoComplete="off"
+          placeholder="Search cities"
+          value={query}
+          maxLength={100}
+          onChange={(event) => {
+            requestRef.current?.abort();
+            setHits(null);
+            setStatus("");
+            setQuery(event.target.value);
+          }}
+        />
+        <button
+          type="submit"
+          className="map-button map-button-primary"
+          disabled={query.trim().length < 2}
+        >
+          <Search aria-hidden="true" /> Search
+        </button>
+      </form>
+      {status && (
+        <p className="reading-meta" role="status">
+          {status}
+        </p>
       )}
-    </div>
+      <ul className="place-list">
+        {(hits ?? findLocalCities(query)).map((location) => (
+          <li key={location.id}>
+            <button type="button" onClick={() => onPick(location)}>
+              <MapPin aria-hidden="true" />
+              <span>
+                <strong>{location.name}</strong>
+                <small>{location.region}</small>
+              </span>
+              <ChevronRight aria-hidden="true" />
+            </button>
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+}
+
+function AirModelCredit({ air }: { air: AirReading }) {
+  const regional = air.model === "cams_europe";
+  return (
+    <p className="reading-meta">
+      <a href={AIR_SOURCE} target="_blank" rel="noreferrer">
+        {regional ? "CAMS Europe" : "CAMS global"}
+      </a>
+      {` · ~${regional ? 11 : 45} km grid · ${formatTime(air.timestamp)}`}
+      {isDelayed(air.timestamp) ? " · delayed" : ""}
+    </p>
+  );
+}
+
+function AirDetails({
+  conditions,
+  loading,
+  countryCode,
+}: {
+  conditions: Environment;
+  loading: boolean;
+  countryCode: string | undefined;
+}) {
+  const { air, weather, observation } = conditions;
+  const observationSource = observation ? AIR_OBSERVATION_SOURCES[observation.source] : null;
+  const official =
+    countryCode &&
+    (OFFICIAL_MONITOR_LINKS[countryCode] ??
+      (EEA_COUNTRIES.has(countryCode)
+        ? {
+            name: "European Environment Agency monitoring map",
+            url: "https://airindex.eea.europa.eu/AQI/",
+          }
+        : null));
+  const pollutants: Array<[string, number | null]> = air
+    ? [
+        ["Fine particles (PM₂.₅)", air.pm25],
+        ["Inhalable particles (PM₁₀)", air.pm10],
+        ["Nitrogen dioxide (NO₂)", air.nitrogenDioxide],
+        ["Ozone (O₃)", air.ozone],
+        ["Carbon monoxide (CO)", air.carbonMonoxide],
+        ["Sulphur dioxide (SO₂)", air.sulphurDioxide],
+        ["Modeled dust", air.dust],
+      ]
+    : [];
+
+  return (
+    <>
+      {observation && observationSource && (
+        <section className="observed-air" aria-label="Measured PM₂.₅">
+          <h3>{Math.round(observation.pm25 * 10) / 10} µg/m³ measured PM₂.₅</h3>
+          <p>{observation.area}</p>
+          <p className="reading-meta">
+            <a href={observationSource.url} target="_blank" rel="noreferrer">
+              {observationSource.detail}
+            </a>
+            {" · "}
+            {formatTime(observation.timestamp)}
+          </p>
+        </section>
+      )}
+      {air ? (
+        <>
+          <h3 className="data-section-title">Area model estimates</h3>
+          <AirModelCredit air={air} />
+          <dl className="pollutant-list">
+            {pollutants.map(([label, value]) => (
+              <div key={label}>
+                <dt>{label}</dt>
+                <dd>
+                  {value === null
+                    ? "Unavailable"
+                    : `${value.toLocaleString(undefined, { maximumFractionDigits: 1 })} µg/m³`}
+                </dd>
+              </div>
+            ))}
+          </dl>
+          {air.usAqi !== null && (
+            <p className="reading-meta">
+              {Math.round(air.usAqi)} modeled US AQI · {airCategory(air.usAqi).label}
+            </p>
+          )}
+        </>
+      ) : (
+        <p className="reading-meta">
+          {loading ? "Getting air conditions…" : "Air estimates are unavailable for this point."}
+        </p>
+      )}
+      {weather && (
+        <p className="reading-meta">
+          <a href={WEATHER_SOURCE} target="_blank" rel="noreferrer">
+            Open-Meteo weather · best available model for this location
+          </a>{" "}
+          · {formatTime(weather.timestamp)}
+          {isDelayed(weather.timestamp) ? " · delayed" : ""}
+          {weather.visibility !== null
+            ? ` · Visibility ${(weather.visibility / 1000).toFixed(1)} km`
+            : ""}
+          {hasModeledFog(weather.code) ? " · Fog modeled" : ""}
+        </p>
+      )}
+      {official && (
+        <a className="guidance-link" href={official.url} target="_blank" rel="noreferrer">
+          {official.name} <ArrowUpRight aria-hidden="true" />
+        </a>
+      )}
+      <p className="reading-meta">
+        The 3D scene uses area weather and air data. Water motion illustrates wind and the path of
+        mapped waterways.
+      </p>
+    </>
+  );
+}
+
+function CompareReading({
+  place,
+  label,
+  air,
+  loading,
+}: {
+  place: PlaceSelection;
+  label: string;
+  air: AirReading | null;
+  loading: boolean;
+}) {
+  return (
+    <section className="comparison-place">
+      <span className="place-role">{label}</span>
+      <h3>{place.name}</h3>
+      {air?.pm25 != null ? (
+        <>
+          <p className="comparison-value">
+            {Math.round(air.pm25 * 10) / 10} <small>µg/m³</small>
+          </p>
+          <AirModelCredit air={air} />
+        </>
+      ) : (
+        <small>
+          <CircleHelp aria-hidden="true" /> {loading ? "Getting conditions…" : "PM₂.₅ unavailable"}
+        </small>
+      )}
+    </section>
   );
 }

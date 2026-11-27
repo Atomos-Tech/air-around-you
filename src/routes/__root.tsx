@@ -76,12 +76,12 @@ export const Route = createRootRoute({
       { title: "Air Around You" },
       {
         name: "description",
-        content: "Explore sample air readings and practical actions around the world.",
+        content: "Explore current modeled air conditions and practical actions around the world.",
       },
       { property: "og:title", content: "Air Around You" },
       {
         property: "og:description",
-        content: "Explore sample air readings and practical actions around the world.",
+        content: "Explore current modeled air conditions and practical actions around the world.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },

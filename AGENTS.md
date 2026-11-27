@@ -1,1 +1,1 @@
-The air-quality prototype keeps sample fixtures and action-plan logic in `src/data/air-quality.ts`. MapLibre loads through the client-only `AirGlobe` component so verified data sources can replace fixtures without moving browser APIs into the server runtime.
+Environmental data providers and air guidance live in `src/data/air-quality.ts`. MapLibre and the avatar render through the client-only `AirGlobe` component. Keep precise device coordinates in the browser and preserve clear source and time labels for modeled readings.

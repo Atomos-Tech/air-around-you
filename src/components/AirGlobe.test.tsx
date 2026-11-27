@@ -1,7 +1,7 @@
 import { act, render } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { SAMPLE_LOCATIONS } from "@/data/air-quality";
+import { WORLD_CITIES } from "@/data/cities";
 import AirGlobe from "./AirGlobe";
 
 const { map, constructMap } = vi.hoisted(() => {
@@ -9,6 +9,14 @@ const { map, constructMap } = vi.hoisted(() => {
     on: vi.fn<(event: string, listener: () => void) => void>(),
     addControl: vi.fn(),
     setProjection: vi.fn(),
+    setLight: vi.fn(),
+    setSky: vi.fn(),
+    setTerrain: vi.fn(),
+    getStyle: vi.fn(() => ({ sources: { openmaptiles: {} }, layers: [] })),
+    getLayer: vi.fn(),
+    addImage: vi.fn(),
+    addSource: vi.fn(),
+    addLayer: vi.fn(),
     flyTo: vi.fn(),
     remove: vi.fn(),
   };
@@ -41,20 +49,24 @@ vi.mock("maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url", () => ({
   default: "/map-worker.js",
 }));
 
+vi.mock("./avatar-scene", () => ({
+  mountAvatar: () => ({ setPaused: vi.fn(), destroy: vi.fn() }),
+}));
+
+const emptyConditions = { air: null, weather: null };
+
 describe("AirGlobe", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("keeps the camera in place when breathing is paused", () => {
     const props = {
-      place: SAMPLE_LOCATIONS[0] ?? null,
+      place: WORLD_CITIES[0] ?? null,
       pendingPoint: null,
       onMapPick: vi.fn(),
       onMapError: vi.fn(),
     };
     const { rerender } = render(
-      <main data-breathing-paused={false}>
-        <AirGlobe {...props} />
-      </main>,
+      <AirGlobe {...props} view="street" conditions={emptyConditions} paused={false} />,
     );
     const listeners = new Map(map.on.mock.calls);
     const styleLoad = listeners.get("style.load");
@@ -65,14 +77,22 @@ describe("AirGlobe", () => {
       load();
     });
 
-    rerender(
-      <main data-breathing-paused={true}>
-        <AirGlobe {...props} />
-      </main>,
-    );
+    rerender(<AirGlobe {...props} view="street" conditions={emptyConditions} paused />);
 
     expect(constructMap).toHaveBeenCalledTimes(1);
     expect(map.setProjection).toHaveBeenCalledWith({ type: "globe" });
+    expect(map.addLayer).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "blue-marble" }),
+      undefined,
+    );
+    expect(map.addLayer).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "mapped-buildings" }),
+      undefined,
+    );
+    expect(map.addLayer).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "surface-ripples", "source-layer": "water" }),
+      undefined,
+    );
     expect(map.flyTo).toHaveBeenCalledTimes(1);
     expect(props.onMapError).toHaveBeenCalledWith(false);
   });
@@ -86,7 +106,15 @@ describe("AirGlobe", () => {
 
     try {
       render(
-        <AirGlobe place={null} pendingPoint={null} onMapPick={vi.fn()} onMapError={onMapError} />,
+        <AirGlobe
+          place={null}
+          pendingPoint={null}
+          view="globe"
+          conditions={emptyConditions}
+          paused={false}
+          onMapPick={vi.fn()}
+          onMapError={onMapError}
+        />,
       );
       expect(onMapError).toHaveBeenCalledWith(true);
     } finally {
