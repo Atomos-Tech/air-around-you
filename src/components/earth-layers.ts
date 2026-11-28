@@ -1,12 +1,23 @@
 import type { Map as MapLibreMap } from "maplibre-gl";
 
+import { solarLightPosition } from "./solar-light";
 import { installWaterRipples } from "./water-ripples";
 
 export const TERRAIN_SOURCE = "world-elevation";
 
+export function updateEarthLight(map: MapLibreMap) {
+  map.setLight({
+    anchor: "map",
+    color: "#fff4e9",
+    intensity: 0.32,
+    position: solarLightPosition(new Date()),
+    "position-transition": { duration: 0, delay: 0 },
+  });
+}
+
 export function installEarthLayers(map: MapLibreMap) {
   map.setProjection({ type: "globe" });
-  map.setLight({ anchor: "map", color: "#fff4e9", intensity: 0.32, position: [1.15, 220, 42] });
+  updateEarthLight(map);
   map.setSky({
     "sky-color": "#071421",
     "horizon-color": "#8fb2c8",
@@ -14,7 +25,8 @@ export function installEarthLayers(map: MapLibreMap) {
     "sky-horizon-blend": 0.38,
     "horizon-fog-blend": 0.65,
     "fog-ground-blend": 0.4,
-    "atmosphere-blend": ["interpolate", ["linear"], ["zoom"], 1, 0.85, 12, 0.08],
+    // Make daylight visible from orbit and fade the tint as the user approaches the ground.
+    "atmosphere-blend": ["interpolate", ["linear"], ["zoom"], 1, 0.42, 12, 0.08],
   });
 
   const style = map.getStyle();

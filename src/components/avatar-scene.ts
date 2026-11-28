@@ -36,7 +36,7 @@ export function mountAvatar(container: HTMLElement) {
   rimLight.position.set(3, 2, -3);
   scene.add(rimLight);
 
-  const { character, torso, head } = createCharacter();
+  const { character, torso, chest, head } = createCharacter();
   scene.add(character);
 
   const shadow = new Mesh(
@@ -60,8 +60,8 @@ export function mountAvatar(container: HTMLElement) {
       cycle < 0.38
         ? (1 - Math.cos((cycle / 0.38) * Math.PI)) / 2
         : (1 + Math.cos(((cycle - 0.38) / 0.62) * Math.PI)) / 2;
-    torso.scale.set(1 + expansion * 0.026, 1, 1 + expansion * 0.046);
-    torso.position.y = expansion * 0.01;
+    chest.scale.set(1 + expansion * 0.17, 1 + expansion * 0.055, 1 + expansion * 0.24);
+    torso.position.y = expansion * 0.035;
     head.rotation.y = Math.sin(elapsed / 3100) * 0.075;
     renderer.render(scene, camera);
     if (!paused) frame = requestAnimationFrame(render);
@@ -98,10 +98,13 @@ export function mountAvatar(container: HTMLElement) {
 function createCharacter() {
   const character = new Group();
   const torso = new Group();
+  const chest = new Group();
   const head = new Group();
   character.add(torso);
-  torso.add(head);
+  torso.add(chest, head);
 
+  chest.name = "chest";
+  chest.position.y = 1.22;
   head.position.y = 1.71;
 
   function material(color: number) {
@@ -149,9 +152,9 @@ function createCharacter() {
     parent.add(mesh);
   }
 
-  oval(torso, coat, [0, 1.22, 0], [0.225, 0.31, 0.128]);
-  oval(torso, shirt, [0, 1.31, 0.12], [0.052, 0.22, 0.021]);
-  oval(torso, trim, [0, 1.47, -0.028], [0.159, 0.09, 0.105]);
+  oval(chest, coat, [0, 0, 0], [0.225, 0.31, 0.128]);
+  oval(chest, shirt, [0, 0.09, 0.12], [0.052, 0.22, 0.021]);
+  oval(chest, trim, [0, 0.25, -0.028], [0.159, 0.09, 0.105]);
   oval(torso, trim, [0, 1.03, 0], [0.174, 0.082, 0.119]);
   limb(torso, skin, [0, 1.48, 0], [0, 1.68, 0], 0.074);
   oval(head, skin, [0, 0, 0], [0.145, 0.192, 0.133]);
@@ -176,5 +179,5 @@ function createCharacter() {
     oval(character, shoe, [side * 0.119, 0.072, 0.044], [0.076, 0.057, 0.139]);
   }
 
-  return { character, torso, head };
+  return { character, torso, chest, head };
 }

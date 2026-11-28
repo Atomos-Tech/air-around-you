@@ -12,16 +12,11 @@
 }
 
 .map-stage,
-.earth-map,
-.atmosphere-canvas {
+.earth-map {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-}
-.atmosphere-canvas {
-  pointer-events: none;
-  z-index: 2;
 }
 .map-loading {
   display: grid;

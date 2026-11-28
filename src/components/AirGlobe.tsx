@@ -1,12 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as maplibregl from "maplibre-gl";
 import mapWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 
 import type { Environment } from "@/data/air-quality";
 import type { MapPoint, PlaceSelection } from "@/data/places";
-import Atmosphere from "./Atmosphere";
 import type { mountAvatar } from "./avatar-scene";
-import { installEarthLayers, TERRAIN_SOURCE } from "./earth-layers";
+import { installEarthLayers, TERRAIN_SOURCE, updateEarthLight } from "./earth-layers";
 import { animateWaterRipples } from "./water-ripples";
 
 type Props = {
@@ -68,8 +67,12 @@ function useEarthMap(onMapPick: Props["onMapPick"], onMapError: Props["onMapErro
     map.on("click", (event) =>
       onMapPick({ longitude: event.lngLat.lng, latitude: event.lngLat.lat }),
     );
+    const daylightTimer = window.setInterval(() => {
+      if (loaded) updateEarthLight(map);
+    }, 60_000);
 
     return () => {
+      window.clearInterval(daylightTimer);
       map.remove();
       mapRef.current = null;
       setMapReady(false);
@@ -196,21 +199,5 @@ export default function AirGlobe({
     };
   }, [mapRef, mapReady, pendingPoint]);
 
-  const getLocalView = useCallback(() => {
-    const map = mapRef.current;
-    if (!map || !place || view !== "street" || map.getZoom() < 13) return null;
-    const { x, y } = map.project([place.longitude, place.latitude]);
-    const { clientWidth, clientHeight } = map.getContainer();
-    if (x < 0 || y < 0 || x > clientWidth || y > clientHeight) return null;
-    return { x, y, bearing: map.getBearing(), pitch: map.getPitch() };
-  }, [view, place, mapRef]);
-
-  return (
-    <>
-      <div ref={containerRef} className="earth-map" aria-label="Interactive Earth map" />
-      {view === "street" && place && (
-        <Atmosphere conditions={conditions} paused={paused} getLocalView={getLocalView} />
-      )}
-    </>
-  );
+  return <div ref={containerRef} className="earth-map" aria-label="Interactive Earth map" />;
 }

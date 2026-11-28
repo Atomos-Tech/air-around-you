@@ -70,11 +70,12 @@ export default function MapControls({
           <button
             type="button"
             className="motion-control"
-            aria-label={paused ? "Resume scene motion" : "Pause scene motion"}
-            title={paused ? "Resume scene motion" : "Pause scene motion"}
+            aria-label={paused ? "Resume 3D animations" : "Pause 3D animations"}
+            title={paused ? "Resume 3D animations" : "Pause 3D animations"}
             onClick={toggleMotion}
           >
             {paused ? <Play aria-hidden="true" /> : <Pause aria-hidden="true" />}
+            {paused ? "Resume" : "Pause"}
           </button>
         )}
       </div>

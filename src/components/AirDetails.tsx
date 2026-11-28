@@ -66,8 +66,7 @@ export default function AirDetails({
         </a>
       )}
       <p className="reading-meta">
-        The 3D scene uses area weather and air data. Water motion illustrates wind and the path of
-        mapped waterways.
+        Water motion in 3D view illustrates wind and the path of mapped waterways.
       </p>
     </>
   );

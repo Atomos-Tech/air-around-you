@@ -97,6 +97,40 @@ describe("AirGlobe", () => {
     expect(props.onMapError).toHaveBeenCalledWith(false);
   });
 
+  it("updates daylight while the globe is open and stops the timer on unmount", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-03-20T12:00:00Z"));
+      const { unmount } = render(
+        <AirGlobe
+          place={null}
+          pendingPoint={null}
+          view="globe"
+          conditions={emptyConditions}
+          paused
+          onMapPick={vi.fn()}
+          onMapError={vi.fn()}
+        />,
+      );
+      const listeners = new Map(map.on.mock.calls);
+      act(() => {
+        listeners.get("style.load")?.();
+        listeners.get("load")?.();
+      });
+      act(() => vi.advanceTimersByTime(60_000));
+      expect(map.setLight).toHaveBeenCalledTimes(2);
+      expect(map.setLight.mock.calls[1]?.[0].position).not.toEqual(
+        map.setLight.mock.calls[0]?.[0].position,
+      );
+      expect(map.flyTo).toHaveBeenCalledTimes(1);
+      unmount();
+      act(() => vi.advanceTimersByTime(60_000));
+      expect(map.setLight).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("reports an unavailable map when WebGL initialization fails", () => {
     constructMap.mockImplementationOnce(function () {
       throw new Error("WebGL unavailable");
